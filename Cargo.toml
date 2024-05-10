@@ -1,0 +1,22 @@
+[package]
+name = "shaderlock"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+calloop = { version = "0.13.0", features = ["executor"] }
+env_logger = "0.11.2"
+futures-intrusive = "0.5.0"
+image = "0.24.9"
+pollster = "0.3.0"
+raw-window-handle = "0.6.0"
+rayon = "1.10.0"
+shaderc = "0.8.3"
+wayland-client = "0.31.1"
+wgpu = { version = "0.19.3", features = ["spirv"] }
+
+[dependencies.smithay-client-toolkit]
+git = "https://github.com/Smithay/client-toolkit" 
+version = "0.18.0"
