@@ -87,8 +87,7 @@ pub fn runlock() {
     let handle = event_loop.handle();
     let (exec, sched) = calloop::futures::executor().unwrap();
     handle
-        .insert_source(exec, |result, _metadata, shared| {
-            // Print the value of the async block ie. the return value.
+        .insert_source(exec, |result: RenderResult, _metadata, shared| {
             shared.render = Some(result);
         })
         .map_err(|e| e.error)
@@ -130,19 +129,18 @@ pub fn runlock() {
             &mut app_data,
             |app_data| {
                 if let Some(result) = app_data.render.as_ref() {
-                    let buffer = app_data.make_buffer(&qh, result);
-                    for surface in app_data.lock_surfaces.iter() {
-                        let wl = surface.wl_surface();
-                        wl.attach(Some(&buffer), 0, 0);
-                        wl.commit();
-                    }
-                    buffer.destroy();
+                    println!("frame!");
+                    // update lockscreen with current result
+                    let width = result.width;
+                    let height = result.height;
+                    app_data.render(&qh, result);
+                    app_data.render = None;
+                    // schedule rendering for next frame
+                    let wgpu = Arc::clone(&app_data.wgpu);
+                    let test = async move { wgpu.render(width, height).await };
+                    app_data.sched.schedule(test).unwrap();
                 }
-
                 // println!("frame! {:?}", qh);
-                // Finally, this is where you can insert the processing you need
-                // to do do between each waiting event eg. drawing logic if
-                // you're doing a GUI app.
                 if app_data.exit {
                     signal.stop();
                 }
@@ -152,7 +150,8 @@ pub fn runlock() {
 }
 
 impl AppData {
-    fn make_buffer(&self, qh: &QueueHandle<Self>, result: &RenderResult) -> WlBuffer {
+    fn render(&self, qh: &QueueHandle<Self>, result: &RenderResult) {
+        // make buffer object
         let mut pool = RawPool::new(
             result.width as usize * result.height as usize * 4,
             &self.shm,
@@ -160,7 +159,7 @@ impl AppData {
         .unwrap();
         let canvas = pool.mmap();
         canvas.copy_from_slice(&result.content);
-        pool.create_buffer(
+        let buffer = pool.create_buffer(
             0,
             result.width as i32,
             result.height as i32,
@@ -168,7 +167,14 @@ impl AppData {
             wl_shm::Format::Argb8888,
             (),
             qh,
-        )
+        );
+        // update surfaces with render-result
+        for surface in self.lock_surfaces.iter() {
+            let wl = surface.wl_surface();
+            wl.attach(Some(&buffer), 0, 0);
+            wl.commit();
+        }
+        buffer.destroy();
     }
 }
 
