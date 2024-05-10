@@ -1,6 +1,6 @@
 //! Smithay Wayland LockScreen Generation and Runtime
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use calloop::futures::Scheduler;
@@ -21,11 +21,6 @@ use wayland_client::protocol::wl_buffer::WlBuffer;
 use wayland_client::protocol::{wl_buffer, wl_output, wl_shm, wl_surface};
 use wayland_client::{Connection, Proxy, QueueHandle};
 
-use raw_window_handle::{
-    HasRawDisplayHandle, HasRawWindowHandle, RawDisplayHandle, RawWindowHandle,
-    WaylandDisplayHandle, WaylandWindowHandle,
-};
-
 use crate::wgpu::{RenderResult, WgpuState};
 
 struct AppData {
@@ -42,7 +37,7 @@ struct AppData {
     session_lock: Option<SessionLock>,
     lock_surfaces: Vec<SessionLockSurface>,
 
-    wgpu: Arc<WgpuState>,
+    wgpu: Arc<RwLock<WgpuState<'static>>>,
     sched: Scheduler<RenderResult>,
     render: Option<RenderResult>,
 
@@ -67,10 +62,6 @@ struct AppData {
 // the first test should simply be rendering something basic with wgpu
 // onto the lockscreen. checking if a steady animation works well at high-fps
 // and moving onto more advanced methods from there.
-
-fn print_type_of<T>(_: &T) {
-    println!("{}", std::any::type_name::<T>())
-}
 
 pub fn runlock() {
     env_logger::init();
@@ -105,7 +96,7 @@ pub fn runlock() {
         session_lock: None,
         lock_surfaces: Vec::new(),
         exit: false,
-        wgpu: Arc::new(wgpu),
+        wgpu: Arc::new(RwLock::new(wgpu)),
         sched,
         render: None,
         qh: qh.to_owned(),
@@ -136,8 +127,11 @@ pub fn runlock() {
                     app_data.render(&qh, result);
                     app_data.render = None;
                     // schedule rendering for next frame
-                    let wgpu = Arc::clone(&app_data.wgpu);
-                    let test = async move { wgpu.render(width, height).await };
+                    let arc = Arc::clone(&app_data.wgpu);
+                    let test = async move {
+                        let mut wgpu = arc.write().unwrap();
+                        wgpu.render(width, height).await
+                    };
                     app_data.sched.schedule(test).unwrap();
                 }
                 // println!("frame! {:?}", qh);
@@ -215,15 +209,18 @@ impl SessionLockHandler for AppData {
     fn configure(
         &mut self,
         _conn: &Connection,
-        qh: &QueueHandle<Self>,
-        session_lock_surface: SessionLockSurface,
+        _qh: &QueueHandle<Self>,
+        _session_lock_surface: SessionLockSurface,
         configure: SessionLockSurfaceConfigure,
         _serial: u32,
     ) {
         let (width, height) = configure.new_size;
 
-        let wgpu = Arc::clone(&self.wgpu);
-        let test = async move { wgpu.render(width, height).await };
+        let arc = Arc::clone(&self.wgpu);
+        let test = async move {
+            let mut wgpu = arc.write().unwrap();
+            wgpu.render(width, height).await
+        };
         self.sched.schedule(test).unwrap();
 
         // let s = session_lock_surface.wl_surface();

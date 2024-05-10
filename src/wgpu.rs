@@ -18,15 +18,68 @@ pub struct RenderResult {
     pub content: Vec<u8>,
 }
 
+struct InnerState<'a> {
+    pub unpadded_bytes_per_row: usize,
+    pub padded_bytes_per_row: usize,
+    pub texture: wgpu::Texture,
+    pub texture_size: wgpu::Extent3d,
+    pub texture_view: wgpu::TextureView,
+    pub output_buffer_desc: wgpu::BufferDescriptor<'a>,
+}
+
+impl<'a> InnerState<'a> {
+    fn new(width: u32, height: u32, device: &wgpu::Device) -> Self {
+        // fix width to match required size (https://github.com/ggez/ggez/pull/1210)
+        let unpadded_bytes_per_row = width as usize * BYTES_PER_PIXEL as usize;
+        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
+        let padded_bytes_per_row_padding = (align - unpadded_bytes_per_row % align) % align;
+        let padded_bytes_per_row = unpadded_bytes_per_row + padded_bytes_per_row_padding;
+        // generate texture
+        let texture_desc = wgpu::TextureDescriptor {
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: TEXTURE_FORMAT,
+            usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            label: None,
+            view_formats: &[TEXTURE_FORMAT],
+        };
+        let texture = device.create_texture(&texture_desc);
+        let texture_view = texture.create_view(&Default::default());
+        // build output buffer for texture-size
+        let output_buffer_size = (padded_bytes_per_row as u32 * height) as wgpu::BufferAddress;
+        let output_buffer_desc = wgpu::BufferDescriptor {
+            size: output_buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            label: None,
+            mapped_at_creation: false,
+        };
+        Self {
+            unpadded_bytes_per_row,
+            padded_bytes_per_row,
+            texture,
+            texture_size: texture_desc.size,
+            texture_view,
+            output_buffer_desc,
+        }
+    }
+}
+
 /// Wgpu State Tracker
-pub struct WgpuState {
+pub struct WgpuState<'a> {
     // wgpu elements
     device: wgpu::Device,
     queue: wgpu::Queue,
     render_pipeline: wgpu::RenderPipeline,
+    inner: Option<InnerState<'a>>,
 }
 
-impl WgpuState {
+impl<'a> WgpuState<'a> {
     /// Build Wgpu State Instance
     pub async fn new() -> Self {
         // spawn wgpu instance
@@ -124,42 +177,17 @@ impl WgpuState {
             device,
             queue,
             render_pipeline,
+            inner: None,
         }
     }
 
     //TODO: move reusable elements into separate option<state> object
-    pub async fn render(&self, width: u32, height: u32) -> RenderResult {
-        // fix width to match required size (https://github.com/ggez/ggez/pull/1210)
-        let unpadded_bytes_per_row = width as usize * BYTES_PER_PIXEL as usize;
-        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
-        let padded_bytes_per_row_padding = (align - unpadded_bytes_per_row % align) % align;
-        let padded_bytes_per_row = unpadded_bytes_per_row + padded_bytes_per_row_padding;
-        // generate texture
-        let texture_desc = wgpu::TextureDescriptor {
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: TEXTURE_FORMAT,
-            usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::RENDER_ATTACHMENT,
-            label: None,
-            view_formats: &[TEXTURE_FORMAT],
-        };
-        let texture = self.device.create_texture(&texture_desc);
-        let texture_view = texture.create_view(&Default::default());
-        // build output buffer for texture-size
-        let output_buffer_size = (padded_bytes_per_row as u32 * height) as wgpu::BufferAddress;
-        let output_buffer_desc = wgpu::BufferDescriptor {
-            size: output_buffer_size,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            label: None,
-            mapped_at_creation: false,
-        };
-        let output_buffer = self.device.create_buffer(&output_buffer_desc);
+    pub async fn render(&mut self, width: u32, height: u32) -> RenderResult {
+        if self.inner.is_none() {
+            self.inner = Some(InnerState::new(width, height, &self.device));
+        }
+        let inner = self.inner.as_ref().unwrap();
+        let output_buffer = self.device.create_buffer(&inner.output_buffer_desc);
         // build renderpass for texture
         let mut encoder = self
             .device
@@ -168,7 +196,7 @@ impl WgpuState {
             let render_pass_desc = wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &texture_view,
+                    view: &inner.texture_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -201,7 +229,7 @@ impl WgpuState {
         encoder.copy_texture_to_buffer(
             wgpu::ImageCopyTexture {
                 aspect: wgpu::TextureAspect::All,
-                texture: &texture,
+                texture: &inner.texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
             },
@@ -209,11 +237,11 @@ impl WgpuState {
                 buffer: &output_buffer,
                 layout: wgpu::ImageDataLayout {
                     offset: 0,
-                    bytes_per_row: Some(padded_bytes_per_row as u32),
+                    bytes_per_row: Some(inner.padded_bytes_per_row as u32),
                     rows_per_image: Some(height),
                 },
             },
-            texture_desc.size,
+            inner.texture_size,
         );
         // Submit the command in the queue to execute
         self.queue.submit(Some(encoder.finish()));
@@ -226,19 +254,14 @@ impl WgpuState {
         self.device.poll(wgpu::Maintain::Wait);
         rx.receive().await.unwrap().unwrap();
         // map buffered data back to standard size
-        // and convert rgba8888 to argb8888 :/
-        let data = buffer_slice.get_mapped_range();
-        let content = data
-            .par_chunks(padded_bytes_per_row)
-            .map(|chunk| {
-                chunk[..unpadded_bytes_per_row]
-                    .chunks_exact(4)
-                    .map(|rgba| [rgba[3], rgba[0], rgba[1], rgba[2]])
-                    .flatten()
-                    .collect::<Vec<u8>>()
-            })
-            .flatten()
-            .collect();
+        // and convert rgba8888 to argb8888
+        let mut data = buffer_slice.get_mapped_range_mut();
+        let mut content = vec![];
+        for chunk in data.chunks_mut(inner.padded_bytes_per_row) {
+            let chunk = &mut chunk[..inner.unpadded_bytes_per_row];
+            chunk.rotate_right(1);
+            content.extend_from_slice(chunk);
+        }
         RenderResult {
             width,
             height,
