@@ -8,14 +8,11 @@ edition = "2021"
 [dependencies]
 bytemuck = "1.15.0"
 calloop = { version = "0.13.0", features = ["executor"] }
-cgmath = "0.18.0"
 env_logger = "0.11.2"
 futures-intrusive = "0.5.0"
 image = { version = "0.24.9", features = ["png", "jpeg"], default-features = false }
 libwayshot = "0.3.0"
-md5 = "0.7.0"
 pollster = "0.3.0"
-raw-window-handle = "0.6.0"
 shaderc = "0.8.3"
 wayland-client = "0.31.1"
 wgpu = { version = "0.19.3", features = ["spirv"] }

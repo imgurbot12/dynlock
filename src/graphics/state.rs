@@ -9,8 +9,8 @@ pub const PUSH_CONSTANTS_SIZE: u32 = std::mem::size_of::<FrameUniforms>() as u32
 /// Single Frame Rendering Data
 #[derive(Debug)]
 pub struct Frame {
-    pub width: u32,
-    pub height: u32,
+    pub width: i32,
+    pub height: i32,
     pub content: Vec<u8>,
 }
 
@@ -172,7 +172,7 @@ impl<'a> State<'a> {
                 bind_group_layouts: &[&bind_group_layout],
                 push_constant_ranges: &[wgpu::PushConstantRange {
                     stages: wgpu::ShaderStages::FRAGMENT,
-                    range: 0..8,
+                    range: 0..PUSH_CONSTANTS_SIZE,
                 }],
             });
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -194,7 +194,7 @@ impl<'a> State<'a> {
                 })],
             }),
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
                 cull_mode: Some(wgpu::Face::Back),
@@ -254,17 +254,15 @@ impl<'a> State<'a> {
             };
             let mut render_pass = encoder.begin_render_pass(&render_pass_desc);
 
-            let uniforms = FrameUniforms::from(&self.context);
-            println!("{uniforms:?}");
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.bind_group, &[]);
             render_pass.set_push_constants(
                 wgpu::ShaderStages::FRAGMENT,
                 0,
-                bytemuck::bytes_of(&uniforms),
+                bytemuck::bytes_of(&FrameUniforms::from(&self.context)),
             );
 
-            render_pass.draw(0..3, 0..1);
+            render_pass.draw(0..4, 0..1);
         }
         encoder.copy_texture_to_buffer(
             wgpu::ImageCopyTexture {
@@ -303,8 +301,8 @@ impl<'a> State<'a> {
             content.extend_from_slice(chunk);
         }
         Frame {
-            width,
-            height,
+            width: width as i32,
+            height: height as i32,
             content,
         }
     }

@@ -126,7 +126,7 @@ pub fn runlock() {
                     let arc = Arc::clone(&app_data.wgpu);
                     let test = async move {
                         let mut wgpu = arc.write().unwrap();
-                        wgpu.render(width, height).await
+                        wgpu.render(width as u32, height as u32).await
                     };
                     app_data.sched.schedule(test).unwrap();
                 }
@@ -149,12 +149,11 @@ impl AppData {
         .unwrap();
         let canvas = pool.mmap();
         canvas.copy_from_slice(&result.content);
-        println!("content! {:?}", md5::compute(&result.content));
         let buffer = pool.create_buffer(
             0,
-            result.width as i32,
-            result.height as i32,
-            result.width as i32 * 4,
+            result.width,
+            result.height,
+            result.width * 4,
             wl_shm::Format::Argb8888,
             (),
             qh,
@@ -162,6 +161,7 @@ impl AppData {
         // update surfaces with render-result
         for surface in self.lock_surfaces.iter() {
             let wl = surface.wl_surface();
+            wl.damage_buffer(0, 0, result.width, result.height);
             wl.attach(Some(&buffer), 0, 0);
             wl.commit();
         }
