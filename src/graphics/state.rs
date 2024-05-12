@@ -194,7 +194,7 @@ impl<'a> State<'a> {
                 })],
             }),
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
                 cull_mode: Some(wgpu::Face::Back),
@@ -262,7 +262,7 @@ impl<'a> State<'a> {
                 bytemuck::bytes_of(&FrameUniforms::from(&self.context)),
             );
 
-            render_pass.draw(0..4, 0..1);
+            render_pass.draw(0..6, 0..1);
         }
         encoder.copy_texture_to_buffer(
             wgpu::ImageCopyTexture {

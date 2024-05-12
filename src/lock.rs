@@ -219,46 +219,6 @@ impl SessionLockHandler for AppData {
             wgpu.render(width, height).await
         };
         self.sched.schedule(test).unwrap();
-
-        // let s = session_lock_surface.wl_surface();
-        //
-        // let mut pool = RawPool::new(width as usize * height as usize * 4, &self.shm).unwrap();
-        // let canvas = pool.mmap();
-        // canvas
-        //     .chunks_exact_mut(4)
-        //     .enumerate()
-        //     .for_each(|(index, chunk)| {
-        //         // let x = (index % width as usize) as u32;
-        //         // let y = (index / width as usize) as u32;
-        //         //
-        //         // let a = 0xFF;
-        //         // let r = u32::min(((width - x) * 0xFF) / width, ((height - y) * 0xFF) / height);
-        //         // let g = u32::min((x * 0xFF) / width, ((height - y) * 0xFF) / height);
-        //         // let b = u32::min(((width - x) * 0xFF) / width, (y * 0xFF) / height);
-        //         // let color = (a << 24) + (r << 16) + (g << 8) + b;
-        //
-        //         let color: u32 = 0xB6CFB6;
-        //         // let color: u32 = 0xff0000db;
-        //
-        //         let array: &mut [u8; 4] = chunk.try_into().unwrap();
-        //         *array = color.to_le_bytes();
-        //     });
-        // let buffer = pool.create_buffer(
-        //     0,
-        //     width as i32,
-        //     height as i32,
-        //     width as i32 * 4,
-        //     wl_shm::Format::Argb8888,
-        //     (),
-        //     qh,
-        // );
-        //
-        // session_lock_surface
-        //     .wl_surface()
-        //     .attach(Some(&buffer), 0, 0);
-        // session_lock_surface.wl_surface().commit();
-        //
-        // buffer.destroy();
     }
 }
 
