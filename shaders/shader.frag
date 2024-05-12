@@ -8,6 +8,7 @@ layout(set = 0, binding = 1) uniform sampler s_screenshot;
 layout(push_constant) uniform FrameUniforms {
     float iTime;
     float iFadeAmount;
+    vec2  iResolution;
 };
 
 vec3 palette( float t ) {
@@ -20,7 +21,6 @@ vec3 palette( float t ) {
 }
 
 void main() {
-    vec3 iResolution = vec3(1920.0, 1080.0, 0.0);
     vec2 uv = (gl_FragCoord.xy * 2.0 - iResolution.xy) / iResolution.y;
     vec2 uv0 = uv;
     vec3 finalColor = vec3(0.0);

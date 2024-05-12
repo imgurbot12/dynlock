@@ -19,14 +19,16 @@ pub struct Frame {
 struct FrameUniforms {
     elapsed: f32,
     fade_amount: f32,
+    resolution: [f32; 2],
 }
 
-impl From<&RenderContext> for FrameUniforms {
-    fn from(value: &RenderContext) -> Self {
-        let duration = SystemTime::now().duration_since(value.start).unwrap();
+impl FrameUniforms {
+    fn new(ctx: &RenderContext, width: u32, height: u32) -> Self {
+        let duration = SystemTime::now().duration_since(ctx.start).unwrap();
         Self {
             elapsed: duration.as_secs_f32(),
             fade_amount: 0.0,
+            resolution: [width as f32, height as f32],
         }
     }
 }
@@ -240,10 +242,10 @@ impl<'a> State<'a> {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
-                            a: 1.0,
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
+                            a: 0.0,
                         }),
                         store: wgpu::StoreOp::Store,
                     },
@@ -254,12 +256,13 @@ impl<'a> State<'a> {
             };
             let mut render_pass = encoder.begin_render_pass(&render_pass_desc);
 
+            let constants = FrameUniforms::new(&self.context, width, height);
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.bind_group, &[]);
             render_pass.set_push_constants(
                 wgpu::ShaderStages::FRAGMENT,
                 0,
-                bytemuck::bytes_of(&FrameUniforms::from(&self.context)),
+                bytemuck::bytes_of(&constants),
             );
 
             render_pass.draw(0..6, 0..1);
@@ -297,7 +300,7 @@ impl<'a> State<'a> {
         let mut content = vec![];
         for chunk in data.chunks_mut(inner.padded_bytes_per_row) {
             let chunk = &mut chunk[..inner.unpadded_bytes_per_row];
-            chunk.rotate_right(1);
+            // chunk.rotate_right(1);
             content.extend_from_slice(chunk);
         }
         Frame {
