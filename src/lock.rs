@@ -1,5 +1,4 @@
 //! Smithay Wayland LockScreen Generation and Runtime
-use std::future::Future;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
@@ -17,17 +16,15 @@ use smithay_client_toolkit::session_lock::{SessionLockSurface, SessionLockSurfac
 use smithay_client_toolkit::shm::{raw::RawPool, Shm, ShmHandler};
 
 use wayland_client::globals::registry_queue_init;
-use wayland_client::protocol::wl_buffer::WlBuffer;
 use wayland_client::protocol::{wl_buffer, wl_output, wl_shm, wl_surface};
-use wayland_client::{Connection, Proxy, QueueHandle};
+use wayland_client::{Connection, QueueHandle};
 
-use crate::wgpu::{RenderResult, WgpuState};
+use crate::graphics::{Frame, State};
 
 struct AppData {
     loop_handle: LoopHandle<'static, Self>,
     conn: Connection,
 
-    qh: QueueHandle<Self>,
     compositor_state: CompositorState,
     output_state: OutputState,
     registry_state: RegistryState,
@@ -37,9 +34,9 @@ struct AppData {
     session_lock: Option<SessionLock>,
     lock_surfaces: Vec<SessionLockSurface>,
 
-    wgpu: Arc<RwLock<WgpuState<'static>>>,
-    sched: Scheduler<RenderResult>,
-    render: Option<RenderResult>,
+    wgpu: Arc<RwLock<State<'static>>>,
+    sched: Scheduler<Frame>,
+    render: Option<Frame>,
 
     exit: bool,
 }
@@ -67,24 +64,17 @@ pub fn runlock() {
     env_logger::init();
 
     let conn = Connection::connect_to_env().unwrap();
-
     let (globals, event_queue) = registry_queue_init(&conn).unwrap();
-
     let qh: QueueHandle<AppData> = event_queue.handle();
 
     // prepare event-loop
     let mut event_loop: EventLoop<AppData> =
         EventLoop::try_new().expect("Failed to initialize the event loop!");
+
+    // prepare application state
+    let wgpu = pollster::block_on(State::new(conn.clone()));
     let handle = event_loop.handle();
     let (exec, sched) = calloop::futures::executor().unwrap();
-    handle
-        .insert_source(exec, |result: RenderResult, _metadata, shared| {
-            shared.render = Some(result);
-        })
-        .map_err(|e| e.error)
-        .unwrap();
-    // prepare application state
-    let wgpu = pollster::block_on(WgpuState::new());
     let mut app_data = AppData {
         loop_handle: event_loop.handle(),
         conn: conn.clone(),
@@ -99,7 +89,6 @@ pub fn runlock() {
         wgpu: Arc::new(RwLock::new(wgpu)),
         sched,
         render: None,
-        qh: qh.to_owned(),
     };
 
     app_data.session_lock = Some(
@@ -113,6 +102,13 @@ pub fn runlock() {
         .insert(event_loop.handle())
         .unwrap();
 
+    handle
+        .insert_source(exec, |result, _metadata, app_data| {
+            app_data.render = Some(result);
+        })
+        .map_err(|e| e.error)
+        .expect("Failed to register render callback");
+
     let signal = event_loop.get_signal();
     event_loop
         .run(
@@ -120,7 +116,7 @@ pub fn runlock() {
             &mut app_data,
             |app_data| {
                 if let Some(result) = app_data.render.as_ref() {
-                    println!("frame!");
+                    // println!("frame!");
                     // update lockscreen with current result
                     let width = result.width;
                     let height = result.height;
@@ -144,7 +140,7 @@ pub fn runlock() {
 }
 
 impl AppData {
-    fn render(&self, qh: &QueueHandle<Self>, result: &RenderResult) {
+    fn render(&self, qh: &QueueHandle<Self>, result: &Frame) {
         // make buffer object
         let mut pool = RawPool::new(
             result.width as usize * result.height as usize * 4,
@@ -153,6 +149,7 @@ impl AppData {
         .unwrap();
         let canvas = pool.mmap();
         canvas.copy_from_slice(&result.content);
+        println!("content! {:?}", md5::compute(&result.content));
         let buffer = pool.create_buffer(
             0,
             result.width as i32,

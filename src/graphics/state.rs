@@ -1,87 +1,63 @@
-//! WGPU Integration with LockScreen
+//! Complete Wgpu State Definition
 
-use rayon::prelude::*;
+use std::time::SystemTime;
 
-///TODO: replace with configuration supplied options later
-const FRAG_SHADER: &'static str = include_str!("../shaders/shader.frag");
-const VERT_SHADER: &'static str = include_str!("../shaders/shader.vert");
+use super::{inner::InnerState, FRAG_SHADER, TEXTURE_FORMAT, VERT_SHADER};
 
-const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
-const BYTES_PER_PIXEL: u32 = std::mem::size_of::<u32>() as u32;
+pub const PUSH_CONSTANTS_SIZE: u32 = std::mem::size_of::<FrameUniforms>() as u32;
 
-//TODO: replace expects with thiserror/anyhow later
-
+/// Single Frame Rendering Data
 #[derive(Debug)]
-pub struct RenderResult {
+pub struct Frame {
     pub width: u32,
     pub height: u32,
     pub content: Vec<u8>,
 }
 
-struct InnerState<'a> {
-    pub unpadded_bytes_per_row: usize,
-    pub padded_bytes_per_row: usize,
-    pub texture: wgpu::Texture,
-    pub texture_size: wgpu::Extent3d,
-    pub texture_view: wgpu::TextureView,
-    pub output_buffer_desc: wgpu::BufferDescriptor<'a>,
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct FrameUniforms {
+    elapsed: f32,
+    fade_amount: f32,
 }
 
-impl<'a> InnerState<'a> {
-    fn new(width: u32, height: u32, device: &wgpu::Device) -> Self {
-        // fix width to match required size (https://github.com/ggez/ggez/pull/1210)
-        let unpadded_bytes_per_row = width as usize * BYTES_PER_PIXEL as usize;
-        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
-        let padded_bytes_per_row_padding = (align - unpadded_bytes_per_row % align) % align;
-        let padded_bytes_per_row = unpadded_bytes_per_row + padded_bytes_per_row_padding;
-        // generate texture
-        let texture_desc = wgpu::TextureDescriptor {
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: TEXTURE_FORMAT,
-            usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::RENDER_ATTACHMENT,
-            label: None,
-            view_formats: &[TEXTURE_FORMAT],
-        };
-        let texture = device.create_texture(&texture_desc);
-        let texture_view = texture.create_view(&Default::default());
-        // build output buffer for texture-size
-        let output_buffer_size = (padded_bytes_per_row as u32 * height) as wgpu::BufferAddress;
-        let output_buffer_desc = wgpu::BufferDescriptor {
-            size: output_buffer_size,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            label: None,
-            mapped_at_creation: false,
-        };
+impl From<&RenderContext> for FrameUniforms {
+    fn from(value: &RenderContext) -> Self {
+        let duration = SystemTime::now().duration_since(value.start).unwrap();
         Self {
-            unpadded_bytes_per_row,
-            padded_bytes_per_row,
-            texture,
-            texture_size: texture_desc.size,
-            texture_view,
-            output_buffer_desc,
+            elapsed: duration.as_secs_f32(),
+            fade_amount: 0.0,
         }
     }
 }
 
-/// Wgpu State Tracker
-pub struct WgpuState<'a> {
-    // wgpu elements
+pub struct RenderContext {
+    start: SystemTime,
+    fade_amount: f32,
+}
+
+impl RenderContext {
+    fn new() -> Self {
+        Self {
+            start: SystemTime::now(),
+            fade_amount: 0.0,
+        }
+    }
+}
+
+/// Graphics State Tracker
+pub struct State<'a> {
     device: wgpu::Device,
     queue: wgpu::Queue,
     render_pipeline: wgpu::RenderPipeline,
+    bind_group: wgpu::BindGroup,
     inner: Option<InnerState<'a>>,
+    context: RenderContext,
 }
 
-impl<'a> WgpuState<'a> {
+impl<'a> State<'a> {
     /// Build Wgpu State Instance
-    pub async fn new() -> Self {
+    pub async fn new(conn: wayland_client::Connection) -> Self {
         // spawn wgpu instance
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
@@ -97,7 +73,17 @@ impl<'a> WgpuState<'a> {
             .await
             .expect("Wgpu Init: Adapter Failed");
         let (device, queue) = adapter
-            .request_device(&Default::default(), None)
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: None,
+                    required_features: wgpu::Features::PUSH_CONSTANTS,
+                    required_limits: wgpu::Limits {
+                        max_push_constant_size: PUSH_CONSTANTS_SIZE,
+                        ..Default::default()
+                    },
+                },
+                None,
+            )
             .await
             .expect("Wgpu Init: Device/Queue Failed");
         // compile shader components
@@ -130,12 +116,64 @@ impl<'a> WgpuState<'a> {
             label: Some("Fragment Shader"),
             source: fs_data,
         });
+        // build bind group
+        let screenshot = super::screenshot::screenshot(conn, &device, &queue);
+        let screenshot_view = screenshot.create_view(&wgpu::TextureViewDescriptor::default());
+        let screenshot_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    // This should match the filterable field of the
+                    // corresponding Texture entry above.
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+            label: Some("texture_bind_group_layout"),
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&screenshot_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&screenshot_sampler),
+                },
+            ],
+            label: Some("diffuse_bind_group"),
+        });
         // build rendering pipeline
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[], // entrypoint for uniform variables like screenshot data
-                push_constant_ranges: &[],
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[wgpu::PushConstantRange {
+                    stages: wgpu::ShaderStages::FRAGMENT,
+                    range: 0..8,
+                }],
             });
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Render Pipeline"),
@@ -156,7 +194,7 @@ impl<'a> WgpuState<'a> {
                 })],
             }),
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
                 cull_mode: Some(wgpu::Face::Back),
@@ -177,12 +215,14 @@ impl<'a> WgpuState<'a> {
             device,
             queue,
             render_pipeline,
+            bind_group,
             inner: None,
+            context: RenderContext::new(),
         }
     }
 
     //TODO: move reusable elements into separate option<state> object
-    pub async fn render(&mut self, width: u32, height: u32) -> RenderResult {
+    pub async fn render(&mut self, width: u32, height: u32) -> Frame {
         if self.inner.is_none() {
             self.inner = Some(InnerState::new(width, height, &self.device));
         }
@@ -214,16 +254,16 @@ impl<'a> WgpuState<'a> {
             };
             let mut render_pass = encoder.begin_render_pass(&render_pass_desc);
 
+            let uniforms = FrameUniforms::from(&self.context);
+            println!("{uniforms:?}");
             render_pass.set_pipeline(&self.render_pipeline);
-            /*
-             rp.set_bind_group(0, &self.bind_group, &[]);
-             rp.set_push_constants(
-                wgpu::ShaderStage::FRAGMENT,
+            render_pass.set_bind_group(0, &self.bind_group, &[]);
+            render_pass.set_push_constants(
+                wgpu::ShaderStages::FRAGMENT,
                 0,
-                bytemuck::cast_slice(&[FrameUniforms::from(ctx)]),
+                bytemuck::bytes_of(&uniforms),
             );
-            rp.draw(0..4, 0..1);
-            */
+
             render_pass.draw(0..3, 0..1);
         }
         encoder.copy_texture_to_buffer(
@@ -262,7 +302,7 @@ impl<'a> WgpuState<'a> {
             chunk.rotate_right(1);
             content.extend_from_slice(chunk);
         }
-        RenderResult {
+        Frame {
             width,
             height,
             content,

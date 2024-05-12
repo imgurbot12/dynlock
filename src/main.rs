@@ -1,5 +1,5 @@
+mod graphics;
 mod lock;
-mod wgpu;
 mod wgpu_old;
 
 fn main() {
