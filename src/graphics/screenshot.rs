@@ -2,20 +2,10 @@
 
 use wgpu::util::DeviceExt;
 
+pub type Screenshot = image::ImageBuffer<image::Rgba<u8>, Vec<u8>>;
+
 /// Take Screenshot and make Wgpu Texture
-pub fn screenshot(
-    conn: wayland_client::Connection,
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-) -> wgpu::Texture {
-    // get raw screenshot image buffer
-    // let wayshot = libwayshot::WayshotConnection::from_connection(conn.clone())
-    //     .expect("screenshot connection failed");
-    // let rgba = wayshot.screenshot_all(false).expect("screenshot failed");
-    let img = include_bytes!("../../scripts/space.png");
-    let rgba = image::load_from_memory(img)
-        .expect("failed to load kitty")
-        .to_rgba8();
+pub fn screenshot(rgba: Screenshot, device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::Texture {
     // build wgpu texture from image
     let dimensions = rgba.dimensions();
     let texture_size = wgpu::Extent3d {

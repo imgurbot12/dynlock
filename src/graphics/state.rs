@@ -1,18 +1,16 @@
 //! Complete Wgpu State Definition
 
-use std::time::SystemTime;
+use std::{ptr::NonNull, time::SystemTime};
 
-use super::{inner::InnerState, BYTES_PER_PIXEL, FRAG_SHADER, TEXTURE_FORMAT, VERT_SHADER};
+use raw_window_handle::{
+    RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle,
+};
+use smithay_client_toolkit::session_lock::SessionLockSurface;
+use wayland_client::{Connection, Proxy};
+
+use super::{screenshot::Screenshot, FRAG_SHADER, VERT_SHADER};
 
 pub const PUSH_CONSTANTS_SIZE: u32 = std::mem::size_of::<FrameUniforms>() as u32;
-
-/// Single Frame Rendering Data
-#[derive(Debug)]
-pub struct Frame {
-    pub width: i32,
-    pub height: i32,
-    pub content: Vec<u8>,
-}
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -23,17 +21,19 @@ struct FrameUniforms {
 }
 
 impl FrameUniforms {
-    fn new(ctx: &RenderContext, width: u32, height: u32) -> Self {
+    fn new(ctx: &RenderContext) -> Self {
         let duration = SystemTime::now().duration_since(ctx.start).unwrap();
         Self {
             elapsed: duration.as_secs_f32(),
             fade_amount: 0.0,
-            resolution: [width as f32, height as f32],
+            resolution: [ctx.width as f32, ctx.height as f32],
         }
     }
 }
 
 pub struct RenderContext {
+    width: usize,
+    height: usize,
     start: SystemTime,
     fade_amount: f32,
 }
@@ -41,6 +41,8 @@ pub struct RenderContext {
 impl RenderContext {
     fn new() -> Self {
         Self {
+            width: 256,
+            height: 256,
             start: SystemTime::now(),
             fade_amount: 0.0,
         }
@@ -49,22 +51,42 @@ impl RenderContext {
 
 /// Graphics State Tracker
 pub struct State<'a> {
-    pub device: wgpu::Device,
+    format: wgpu::TextureFormat,
+    device: wgpu::Device,
     queue: wgpu::Queue,
     render_pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
-    inner: Option<InnerState<'a>>,
+    surface: wgpu::Surface<'a>,
     context: RenderContext,
 }
 
 impl<'a> State<'a> {
     /// Build Wgpu State Instance
-    pub async fn new(conn: wayland_client::Connection) -> Self {
+    pub async fn new(
+        conn: &Connection,
+        rgba: Screenshot,
+        lock_surface: &SessionLockSurface,
+    ) -> Self {
         // spawn wgpu instance
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             ..Default::default()
         });
+        // build surface from raw wayland handles
+        let raw_display_handle = RawDisplayHandle::Wayland(WaylandDisplayHandle::new(
+            NonNull::new(conn.backend().display_ptr() as *mut _).unwrap(),
+        ));
+        let raw_window_handle = RawWindowHandle::Wayland(WaylandWindowHandle::new(
+            NonNull::new(lock_surface.wl_surface().id().as_ptr() as *mut _).unwrap(),
+        ));
+        let surface = unsafe {
+            instance
+                .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
+                    raw_display_handle,
+                    raw_window_handle,
+                })
+                .unwrap()
+        };
         // build device/queue from adapter
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -120,7 +142,7 @@ impl<'a> State<'a> {
             source: fs_data,
         });
         // build bind group
-        let screenshot = super::screenshot::screenshot(conn, &device, &queue);
+        let screenshot = super::screenshot::screenshot(rgba, &device, &queue);
         let screenshot_view = screenshot.create_view(&wgpu::TextureViewDescriptor::default());
         let screenshot_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::Repeat,
@@ -169,6 +191,8 @@ impl<'a> State<'a> {
             label: Some("diffuse_bind_group"),
         });
         // build rendering pipeline
+        let capabilities = surface.get_capabilities(&adapter);
+        let texture_format = capabilities.formats[0];
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
@@ -191,7 +215,7 @@ impl<'a> State<'a> {
                 module: &fs_module,
                 entry_point: "main",
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: TEXTURE_FORMAT,
+                    format: texture_format,
                     blend: Some(wgpu::BlendState::REPLACE),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -213,25 +237,44 @@ impl<'a> State<'a> {
                 alpha_to_coverage_enabled: false,
             },
         });
-
         // return compiled state object
         Self {
+            format: texture_format,
             device,
             queue,
             render_pipeline,
             bind_group,
-            inner: None,
+            surface,
             context: RenderContext::new(),
         }
     }
 
-    //TODO: move reusable elements into separate option<state> object
-    pub async fn render(&mut self, width: u32, height: u32) -> Frame {
-        if self.inner.is_none() {
-            self.inner = Some(InnerState::new(width, height, &self.device));
-        }
-        let inner = self.inner.as_ref().unwrap();
-        let output_buffer = self.device.create_buffer(&inner.output_buffer_desc);
+    pub fn configure(&mut self, width: u32, height: u32) {
+        let surface_config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: self.format,
+            view_formats: vec![self.format],
+            alpha_mode: wgpu::CompositeAlphaMode::Auto,
+            width,
+            height,
+            desired_maximum_frame_latency: 2,
+            // Wayland is inherently a mailbox system.
+            present_mode: wgpu::PresentMode::Mailbox,
+        };
+        self.context.width = width as usize;
+        self.context.height = height as usize;
+        self.surface.configure(&self.device, &surface_config);
+    }
+
+    pub fn render(&self) {
+        // prepare texture from surface
+        let surface_texture = self
+            .surface
+            .get_current_texture()
+            .expect("failed to acquire next swapchain texture");
+        let texture_view = surface_texture
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
         // build renderpass for texture
         let mut encoder = self
             .device
@@ -240,7 +283,7 @@ impl<'a> State<'a> {
             let render_pass_desc = wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &inner.texture_view,
+                    view: &texture_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -258,7 +301,7 @@ impl<'a> State<'a> {
             };
             let mut render_pass = encoder.begin_render_pass(&render_pass_desc);
 
-            let constants = FrameUniforms::new(&self.context, width, height);
+            let constants = FrameUniforms::new(&self.context);
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.bind_group, &[]);
             render_pass.set_push_constants(
@@ -269,58 +312,8 @@ impl<'a> State<'a> {
 
             render_pass.draw(0..6, 0..1);
         }
-        encoder.copy_texture_to_buffer(
-            wgpu::ImageCopyTexture {
-                aspect: wgpu::TextureAspect::All,
-                texture: &inner.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-            },
-            wgpu::ImageCopyBuffer {
-                buffer: &output_buffer,
-                layout: wgpu::ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: Some(inner.padded_bytes_per_row as u32),
-                    rows_per_image: Some(height),
-                },
-            },
-            inner.texture_size,
-        );
         // Submit the command in the queue to execute
         self.queue.submit(Some(encoder.finish()));
-        //
-        let buffer_slice = output_buffer.slice(..);
-        let (tx, rx) = futures_intrusive::channel::shared::oneshot_channel();
-        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
-            tx.send(result).unwrap();
-        });
-        self.device.poll(wgpu::Maintain::Wait);
-        rx.receive().await.unwrap().unwrap();
-        // map buffered data back to standard size
-        // and convert rgba8888 to argb8888
-        let mut data = buffer_slice.get_mapped_range_mut();
-        let mut content = vec![];
-        for chunk in data.chunks_mut(inner.padded_bytes_per_row) {
-            let chunk = &mut chunk[..inner.unpadded_bytes_per_row];
-            let chunk: Vec<u8> = chunk
-                .chunks_exact(BYTES_PER_PIXEL as usize)
-                .map(|s| {
-                    let pixel = u32::from_le_bytes(s.try_into().unwrap());
-                    let r = (pixel & 0xff000000) >> 24;
-                    let g = (pixel & 0x00ff0000) >> 16;
-                    let b = (pixel & 0x0000ff00) >> 8;
-                    let a = pixel & 0x000000ff;
-                    let new_pixel = a << 24 | r << 16 | g << 8 | b;
-                    new_pixel.to_ne_bytes()
-                })
-                .flatten()
-                .collect();
-            content.extend_from_slice(&chunk);
-        }
-        Frame {
-            width: width as i32,
-            height: height as i32,
-            content,
-        }
+        surface_texture.present();
     }
 }
