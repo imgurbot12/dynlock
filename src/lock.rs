@@ -1,8 +1,12 @@
 //! Smithay Wayland LockScreen Generation and Runtime
+use std::ptr::NonNull;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use calloop::futures::Scheduler;
+use raw_window_handle::{
+    RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle,
+};
 use smithay_client_toolkit::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay_client_toolkit::reexports::calloop::{EventLoop, LoopHandle};
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
@@ -17,9 +21,9 @@ use smithay_client_toolkit::shm::{raw::RawPool, Shm, ShmHandler};
 
 use wayland_client::globals::registry_queue_init;
 use wayland_client::protocol::{wl_buffer, wl_output, wl_shm, wl_surface};
-use wayland_client::{Connection, QueueHandle};
+use wayland_client::{Connection, Proxy, QueueHandle};
 
-use crate::graphics::{Frame, State};
+use crate::graphics::{self, Frame, State};
 
 struct AppData {
     loop_handle: LoopHandle<'static, Self>,
@@ -71,10 +75,16 @@ pub fn runlock() {
     let mut event_loop: EventLoop<AppData> =
         EventLoop::try_new().expect("Failed to initialize the event loop!");
 
+    // let mut rd = renderdoc::RenderDoc::<renderdoc::V110>::new()
+    //     .expect("Failed to connect to RenderDoc: are you running without it?");
+
     // prepare application state
     let wgpu = pollster::block_on(State::new(conn.clone()));
     let handle = event_loop.handle();
     let (exec, sched) = calloop::futures::executor().unwrap();
+
+    /* rd.start_frame_capture(std::ptr::null(), std::ptr::null()); */
+
     let mut app_data = AppData {
         loop_handle: event_loop.handle(),
         conn: conn.clone(),
@@ -132,11 +142,16 @@ pub fn runlock() {
                 }
                 // println!("frame! {:?}", qh);
                 if app_data.exit {
+                    let wgpu = app_data.wgpu.write().unwrap();
+                    wgpu.device.stop_capture();
+
                     signal.stop();
                 }
             },
         )
         .expect("Error during event loop!");
+
+    /*  rd.end_frame_capture(std::ptr::null(), std::ptr::null()); */
 }
 
 impl AppData {
@@ -153,11 +168,12 @@ impl AppData {
             0,
             result.width,
             result.height,
-            result.width * 4,
+            result.width * graphics::BYTES_PER_PIXEL as i32,
             wl_shm::Format::Argb8888,
             (),
             qh,
         );
+
         // update surfaces with render-result
         for surface in self.lock_surfaces.iter() {
             let wl = surface.wl_surface();
@@ -205,17 +221,25 @@ impl SessionLockHandler for AppData {
 
     fn configure(
         &mut self,
-        _conn: &Connection,
+        conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _session_lock_surface: SessionLockSurface,
+        session_lock_surface: SessionLockSurface,
         configure: SessionLockSurfaceConfigure,
         _serial: u32,
     ) {
         let (width, height) = configure.new_size;
 
+        // let raw_display_handle = RawDisplayHandle::Wayland(WaylandDisplayHandle::new(
+        //     NonNull::new(conn.backend().display_ptr() as *mut _).unwrap(),
+        // ));
+        // let raw_window_handle = RawWindowHandle::Wayland(WaylandWindowHandle::new(
+        //     NonNull::new(session_lock_surface.wl_surface().id().as_ptr() as *mut _).unwrap(),
+        // ));
+
         let arc = Arc::clone(&self.wgpu);
         let test = async move {
             let mut wgpu = arc.write().unwrap();
+            wgpu.device.start_capture();
             wgpu.render(width, height).await
         };
         self.sched.schedule(test).unwrap();

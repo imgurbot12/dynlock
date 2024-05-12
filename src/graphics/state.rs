@@ -2,7 +2,7 @@
 
 use std::time::SystemTime;
 
-use super::{inner::InnerState, FRAG_SHADER, TEXTURE_FORMAT, VERT_SHADER};
+use super::{inner::InnerState, BYTES_PER_PIXEL, FRAG_SHADER, TEXTURE_FORMAT, VERT_SHADER};
 
 pub const PUSH_CONSTANTS_SIZE: u32 = std::mem::size_of::<FrameUniforms>() as u32;
 
@@ -49,7 +49,7 @@ impl RenderContext {
 
 /// Graphics State Tracker
 pub struct State<'a> {
-    device: wgpu::Device,
+    pub device: wgpu::Device,
     queue: wgpu::Queue,
     render_pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
@@ -84,10 +84,11 @@ impl<'a> State<'a> {
                         ..Default::default()
                     },
                 },
-                None,
+                Some(std::path::PathBuf::from("/home/andrew/Code/rust/dynlock/trace").as_path()),
             )
             .await
             .expect("Wgpu Init: Device/Queue Failed");
+
         // compile shader components
         let compiler = shaderc::Compiler::new().expect("Shader Init: Compiler Failed");
         let vs_spirv = compiler
@@ -126,8 +127,8 @@ impl<'a> State<'a> {
             address_mode_v: wgpu::AddressMode::Repeat,
             address_mode_w: wgpu::AddressMode::Repeat,
             mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -196,7 +197,7 @@ impl<'a> State<'a> {
                 })],
             }),
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
                 cull_mode: Some(wgpu::Face::Back),
@@ -212,6 +213,7 @@ impl<'a> State<'a> {
                 alpha_to_coverage_enabled: false,
             },
         });
+
         // return compiled state object
         Self {
             device,
@@ -300,8 +302,20 @@ impl<'a> State<'a> {
         let mut content = vec![];
         for chunk in data.chunks_mut(inner.padded_bytes_per_row) {
             let chunk = &mut chunk[..inner.unpadded_bytes_per_row];
-            // chunk.rotate_right(1);
-            content.extend_from_slice(chunk);
+            let chunk: Vec<u8> = chunk
+                .chunks_exact(BYTES_PER_PIXEL as usize)
+                .map(|s| {
+                    let pixel = u32::from_le_bytes(s.try_into().unwrap());
+                    let r = (pixel & 0xff000000) >> 24;
+                    let g = (pixel & 0x00ff0000) >> 16;
+                    let b = (pixel & 0x0000ff00) >> 8;
+                    let a = pixel & 0x000000ff;
+                    let new_pixel = a << 24 | r << 16 | g << 8 | b;
+                    new_pixel.to_ne_bytes()
+                })
+                .flatten()
+                .collect();
+            content.extend_from_slice(&chunk);
         }
         Frame {
             width: width as i32,
