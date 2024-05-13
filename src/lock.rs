@@ -1,7 +1,7 @@
 //! Smithay Wayland LockScreen Generation and Runtime
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use calloop::{EventLoop, LoopHandle};
 use smithay_client_toolkit::reexports::calloop::timer::{TimeoutAction, Timer};
@@ -11,35 +11,51 @@ use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState};
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
 use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
 use smithay_client_toolkit::registry_handlers;
+use smithay_client_toolkit::seat::keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers};
+use smithay_client_toolkit::seat::pointer::{PointerEvent, PointerHandler};
+use smithay_client_toolkit::seat::Capability;
+use smithay_client_toolkit::seat::{SeatHandler, SeatState};
 use smithay_client_toolkit::session_lock::{SessionLock, SessionLockHandler, SessionLockState};
 use smithay_client_toolkit::session_lock::{SessionLockSurface, SessionLockSurfaceConfigure};
 use smithay_client_toolkit::shm::{Shm, ShmHandler};
 
 use wayland_client::globals::registry_queue_init;
-use wayland_client::protocol::{wl_buffer, wl_output, wl_surface};
+use wayland_client::protocol::{
+    wl_buffer, wl_keyboard, wl_output, wl_pointer, wl_seat, wl_surface,
+};
 use wayland_client::{Connection, Proxy, QueueHandle};
 
 use crate::graphics::{Screenshot, State};
 
 type RenderersMap = BTreeMap<u32, State<'static>>;
 
-struct AppData {
-    loop_handle: LoopHandle<'static, Self>,
-    conn: Connection,
+struct SeatObject {
+    seat: wl_seat::WlSeat,
+    keyboard: Option<wl_keyboard::WlKeyboard>,
+    pointer: Option<wl_pointer::WlPointer>,
+}
 
+struct AppData {
+    exit: bool,
+    loop_handle: LoopHandle<'static, Self>,
+    // common compositer components
+    conn: Connection,
     compositor_state: CompositorState,
     output_state: OutputState,
     registry_state: RegistryState,
     shm: Shm,
-
+    // lockscreen components
     session_lock_state: SessionLockState,
     session_lock: Option<SessionLock>,
     lock_surfaces: Vec<SessionLockSurface>,
-
-    wgpu: Arc<RwLock<RenderersMap>>,
+    // rendering components
+    renderers: Arc<RwLock<RenderersMap>>,
     screenshot: Screenshot,
-
-    exit: bool,
+    // input components
+    seat_state: SeatState,
+    seat_objects: Vec<SeatObject>,
+    keyboard: Option<wl_keyboard::WlKeyboard>,
+    pointer: Option<wl_pointer::WlPointer>,
 }
 
 // general flow
@@ -90,18 +106,26 @@ pub fn runlock() {
         EventLoop::try_new().expect("Failed to initialize the event loop!");
 
     let mut app_data = AppData {
+        exit: false,
         loop_handle: event_loop.handle(),
+        // compositor components
         conn: conn.clone(),
         compositor_state: CompositorState::bind(&globals, &qh).unwrap(),
         output_state: OutputState::new(&globals, &qh),
         registry_state: RegistryState::new(&globals),
         shm: Shm::bind(&globals, &qh).unwrap(),
+        // lockscreen components
         session_lock_state: SessionLockState::new(&globals, &qh),
         session_lock: None,
         lock_surfaces: Vec::new(),
-        exit: false,
-        wgpu: Arc::new(RwLock::new(RenderersMap::new())),
+        // rendering components
+        renderers: Arc::new(RwLock::new(RenderersMap::new())),
         screenshot,
+        // input management components
+        seat_state: SeatState::new(&globals, &qh),
+        seat_objects: vec![],
+        keyboard: None,
+        pointer: None,
     };
 
     app_data.session_lock = Some(
@@ -115,15 +139,14 @@ pub fn runlock() {
         .insert(event_loop.handle())
         .unwrap();
 
-    let handle = event_loop.handle();
-
     let fps = 30;
     let dist = 1000 / fps;
+    let handle = event_loop.handle();
     handle
         .insert_source(
             Timer::from_duration(Duration::from_millis(dist)),
             move |_, _, app_data| {
-                let arc = Arc::clone(&app_data.wgpu);
+                let arc = Arc::clone(&app_data.renderers);
                 let renderers = arc.write().expect("renderer write lock failed");
                 for renderer in renderers.values() {
                     renderer.render();
@@ -141,6 +164,8 @@ pub fn runlock() {
             |app_data| {
                 // handle exit when specified
                 if app_data.exit {
+                    app_data.session_lock.take().unwrap().unlock();
+                    app_data.conn.roundtrip().unwrap();
                     signal.stop();
                 }
             },
@@ -151,33 +176,19 @@ pub fn runlock() {
 impl SessionLockHandler for AppData {
     fn locked(&mut self, conn: &Connection, qh: &QueueHandle<Self>, session_lock: SessionLock) {
         // prepare sufaces and renderers for lockscreen
-        let arc = Arc::clone(&self.wgpu);
+        let arc = Arc::clone(&self.renderers);
         let mut renderers = arc.write().expect("renderer write lock failed");
         for output in self.output_state.outputs() {
+            // generate wayland surfaces
             let surface = self.compositor_state.create_surface(&qh);
             let lock_surface = session_lock.create_lock_surface(surface, &output, qh);
+            // generate wgpu renderer for surface
             let key = lock_surface.wl_surface().id().protocol_id();
             let screenshot = self.screenshot.clone();
             let renderer = pollster::block_on(State::new(conn, screenshot, &lock_surface));
             renderers.insert(key, renderer);
             self.lock_surfaces.push(lock_surface);
         }
-
-        // After 5 seconds, destroy lock
-        self.loop_handle
-            .insert_source(
-                Timer::from_duration(Duration::from_secs(3)),
-                |_, _, app_data| {
-                    // Unlock the lock
-                    app_data.session_lock.take().unwrap().unlock();
-                    // Sync connection to make sure compostor receives destroy
-                    app_data.conn.roundtrip().unwrap();
-                    // Then we can exit
-                    app_data.exit = true;
-                    TimeoutAction::Drop
-                },
-            )
-            .unwrap();
     }
 
     fn finished(
@@ -201,12 +212,151 @@ impl SessionLockHandler for AppData {
 
         // let wgpu = pollster::block_on(State::new(conn.clone()));
 
-        let arc = Arc::clone(&self.wgpu);
+        let arc = Arc::clone(&self.renderers);
         let key = session_lock_surface.wl_surface().id().protocol_id();
         let mut renderers = arc.write().expect("renderer write lock failed");
         let renderer = renderers.get_mut(&key).unwrap();
         renderer.configure(width, height);
         renderer.render();
+    }
+}
+
+impl SeatHandler for AppData {
+    fn seat_state(&mut self) -> &mut SeatState {
+        &mut self.seat_state
+    }
+
+    fn new_seat(&mut self, _: &Connection, _qh: &QueueHandle<Self>, _seat: wl_seat::WlSeat) {}
+
+    fn new_capability(
+        &mut self,
+        _conn: &Connection,
+        qh: &QueueHandle<Self>,
+        seat: wl_seat::WlSeat,
+        capability: Capability,
+    ) {
+        let seat_object = match self.seat_objects.iter_mut().find(|s| s.seat == seat) {
+            Some(seat) => seat,
+            None => {
+                // create the data device here for this seat
+                self.seat_objects.push(SeatObject {
+                    seat: seat.clone(),
+                    keyboard: None,
+                    pointer: None,
+                });
+                self.seat_objects.last_mut().unwrap()
+            }
+        };
+        if capability == Capability::Keyboard && self.keyboard.is_none() {
+            let keyboard = self
+                .seat_state
+                .get_keyboard(qh, &seat, None)
+                .expect("Failed to create keyboard");
+            self.keyboard = Some(keyboard.clone());
+            seat_object.keyboard.replace(keyboard);
+        }
+        if capability == Capability::Pointer && self.pointer.is_none() {
+            let pointer = self
+                .seat_state
+                .get_pointer(qh, &seat)
+                .expect("Failed to create pointer");
+            self.pointer = Some(pointer.clone());
+            seat_object.pointer.replace(pointer);
+        }
+    }
+
+    fn remove_capability(
+        &mut self,
+        _conn: &Connection,
+        _: &QueueHandle<Self>,
+        _: wl_seat::WlSeat,
+        capability: Capability,
+    ) {
+        if capability == Capability::Keyboard && self.keyboard.is_some() {
+            println!("Unset keyboard capability");
+            self.keyboard.take().unwrap().release();
+        }
+        if capability == Capability::Pointer && self.pointer.is_some() {
+            println!("Unset pointer capability");
+            self.pointer.take().unwrap().release();
+        }
+    }
+
+    fn remove_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
+}
+
+impl KeyboardHandler for AppData {
+    fn enter(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_keyboard::WlKeyboard,
+        _surface: &wl_surface::WlSurface,
+        _: u32,
+        _: &[u32],
+        _keysyms: &[Keysym],
+    ) {
+        println!("keyboard enter!");
+    }
+
+    fn leave(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_keyboard::WlKeyboard,
+        _surface: &wl_surface::WlSurface,
+        _: u32,
+    ) {
+        println!("keyboard exit!");
+    }
+
+    fn press_key(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _kbd: &wl_keyboard::WlKeyboard,
+        _serial: u32,
+        event: KeyEvent,
+    ) {
+        if event.keysym == Keysym::Escape {
+            log::info!("escape key pressed. exiting!");
+            self.exit = true;
+        }
+        println!("keyboard {event:?}");
+    }
+
+    fn release_key(
+        &mut self,
+        _: &Connection,
+        _qh: &QueueHandle<Self>,
+        _kbd: &wl_keyboard::WlKeyboard,
+        _serial: u32,
+        _event: KeyEvent,
+    ) {
+    }
+
+    fn update_modifiers(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_keyboard::WlKeyboard,
+        _serial: u32,
+        modifiers: Modifiers,
+        _layout: u32,
+    ) {
+        println!("modifiers! {modifiers:?}");
+    }
+}
+
+impl PointerHandler for AppData {
+    fn pointer_frame(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _pointer: &wl_pointer::WlPointer,
+        _events: &[PointerEvent],
+    ) {
+        // println!("pointer events: {events:?}")
     }
 }
 
@@ -282,6 +432,9 @@ impl ShmHandler for AppData {
     }
 }
 
+smithay_client_toolkit::delegate_seat!(AppData);
+smithay_client_toolkit::delegate_keyboard!(AppData);
+smithay_client_toolkit::delegate_pointer!(AppData);
 smithay_client_toolkit::delegate_compositor!(AppData);
 smithay_client_toolkit::delegate_output!(AppData);
 smithay_client_toolkit::delegate_session_lock!(AppData);
