@@ -147,8 +147,8 @@ pub fn runlock() {
             Timer::from_duration(Duration::from_millis(dist)),
             move |_, _, app_data| {
                 let arc = Arc::clone(&app_data.renderers);
-                let renderers = arc.write().expect("renderer write lock failed");
-                for renderer in renderers.values() {
+                let mut renderers = arc.write().expect("renderer write lock failed");
+                for renderer in renderers.values_mut() {
                     renderer.render();
                 }
                 TimeoutAction::ToDuration(Duration::from_millis(dist))
@@ -238,7 +238,6 @@ impl SeatHandler for AppData {
         let seat_object = match self.seat_objects.iter_mut().find(|s| s.seat == seat) {
             Some(seat) => seat,
             None => {
-                // create the data device here for this seat
                 self.seat_objects.push(SeatObject {
                     seat: seat.clone(),
                     keyboard: None,

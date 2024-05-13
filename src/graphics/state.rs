@@ -8,7 +8,7 @@ use raw_window_handle::{
 use smithay_client_toolkit::session_lock::SessionLockSurface;
 use wayland_client::{Connection, Proxy};
 
-use super::{screenshot::Screenshot, FRAG_SHADER, VERT_SHADER};
+use super::{screenshot::Screenshot, ui::IcedState, FRAG_SHADER, VERT_SHADER};
 
 pub const PUSH_CONSTANTS_SIZE: u32 = std::mem::size_of::<FrameUniforms>() as u32;
 
@@ -58,6 +58,7 @@ pub struct State<'a> {
     bind_group: wgpu::BindGroup,
     surface: wgpu::Surface<'a>,
     context: RenderContext,
+    iced: IcedState,
 }
 
 impl<'a> State<'a> {
@@ -237,6 +238,8 @@ impl<'a> State<'a> {
                 alpha_to_coverage_enabled: false,
             },
         });
+        // spawn iced components
+        let iced = IcedState::new(&adapter, &device, &queue, texture_format);
         // return compiled state object
         Self {
             format: texture_format,
@@ -246,6 +249,7 @@ impl<'a> State<'a> {
             bind_group,
             surface,
             context: RenderContext::new(),
+            iced,
         }
     }
 
@@ -264,9 +268,10 @@ impl<'a> State<'a> {
         self.context.width = width as usize;
         self.context.height = height as usize;
         self.surface.configure(&self.device, &surface_config);
+        self.iced.configure(width, height);
     }
 
-    pub fn render(&self) {
+    pub fn render(&mut self) {
         // prepare texture from surface
         let surface_texture = self
             .surface
@@ -286,12 +291,7 @@ impl<'a> State<'a> {
                     view: &texture_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.0,
-                            g: 0.0,
-                            b: 0.0,
-                            a: 0.0,
-                        }),
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -301,6 +301,7 @@ impl<'a> State<'a> {
             };
             let mut render_pass = encoder.begin_render_pass(&render_pass_desc);
 
+            // render shaders with uniforms and constants
             let constants = FrameUniforms::new(&self.context);
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.bind_group, &[]);
@@ -309,11 +310,12 @@ impl<'a> State<'a> {
                 0,
                 bytemuck::bytes_of(&constants),
             );
-
             render_pass.draw(0..6, 0..1);
         }
-        // Submit the command in the queue to execute
-        self.queue.submit(Some(encoder.finish()));
+        // submit rendering for final generation
+        self.iced
+            .render(&self.device, &self.queue, encoder, &texture_view);
+        // self.queue.submit(Some(encoder.finish()));
         surface_texture.present();
     }
 }
