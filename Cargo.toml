@@ -20,6 +20,7 @@ pollster = "0.3.0"
 raw-window-handle = "0.6.1"
 renderdoc = { version = "0.12.1", default-features = false }
 shaderc = "0.8.3"
+smol_str = "0.2.1"
 wayland-backend = { version = "0.3.3", features = ["client_system"] }
 wayland-client = { version = "0.31.2" }
 wgpu = { version = "0.19.3", features = ["spirv"] }
