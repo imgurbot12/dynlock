@@ -1,7 +1,7 @@
 //! Smithay Wayland LockScreen Generation and Runtime
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use calloop::{EventLoop, LoopHandle};
 use smithay_client_toolkit::reexports::calloop::timer::{TimeoutAction, Timer};
@@ -85,8 +85,6 @@ pub fn runlock() {
         .expect("failed to load screenshot")
         .to_rgba8();
 
-    // screenshot.write_to(writer, image::ImageFormat::Png);
-
     // prepare event-loop
     let mut event_loop: EventLoop<AppData> =
         EventLoop::try_new().expect("Failed to initialize the event loop!");
@@ -117,30 +115,37 @@ pub fn runlock() {
         .insert(event_loop.handle())
         .unwrap();
 
-    let signal = event_loop.get_signal();
-    event_loop
-        .run(
-            std::time::Duration::from_millis(16),
-            &mut app_data,
-            |app_data| {
-                // render frame when able
+    let handle = event_loop.handle();
+
+    let fps = 30;
+    let dist = 1000 / fps;
+    handle
+        .insert_source(
+            Timer::from_duration(Duration::from_millis(dist)),
+            move |_, _, app_data| {
                 let arc = Arc::clone(&app_data.wgpu);
                 let renderers = arc.write().expect("renderer write lock failed");
                 for renderer in renderers.values() {
                     renderer.render();
                 }
-                // println!("frame! {:?}", qh);
-                if app_data.exit {
-                    // let wgpu = app_data.wgpu.write().unwrap();
-                    // wgpu.device.stop_capture();
+                TimeoutAction::ToDuration(Duration::from_millis(dist))
+            },
+        )
+        .expect("failed to schedule rendering loop");
 
+    let signal = event_loop.get_signal();
+    event_loop
+        .run(
+            std::time::Duration::from_millis(dist * 2),
+            &mut app_data,
+            |app_data| {
+                // handle exit when specified
+                if app_data.exit {
                     signal.stop();
                 }
             },
         )
         .expect("Error during event loop!");
-
-    /*  rd.end_frame_capture(std::ptr::null(), std::ptr::null()); */
 }
 
 impl SessionLockHandler for AppData {

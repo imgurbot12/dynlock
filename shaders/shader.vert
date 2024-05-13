@@ -20,9 +20,9 @@ const vec2 tex_positions[6] = vec2[6](
     vec2(1.0, -1.0)  //z
 );
 
-layout(location=0) out vec2 v_tex_coords;
+// layout(location=0) out vec2 v_tex_coords;
 
 void main() {
     gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
-    v_tex_coords = tex_positions[gl_VertexIndex];
+    // v_tex_coords = tex_positions[gl_VertexIndex];
 }
