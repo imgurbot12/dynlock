@@ -25,6 +25,7 @@ use wayland_client::protocol::{
 };
 use wayland_client::{Connection, Proxy, QueueHandle};
 
+use crate::event::{keypress_event, mouse_event};
 use crate::graphics::{Screenshot, State};
 
 type RenderersMap = BTreeMap<u32, State<'static>>;
@@ -55,6 +56,7 @@ struct AppData {
     seat_state: SeatState,
     seat_objects: Vec<SeatObject>,
     keyboard: Option<wl_keyboard::WlKeyboard>,
+    modifiers: Option<Modifiers>,
     pointer: Option<wl_pointer::WlPointer>,
 }
 
@@ -125,6 +127,7 @@ pub fn runlock() {
         seat_state: SeatState::new(&globals, &qh),
         seat_objects: vec![],
         keyboard: None,
+        modifiers: None,
         pointer: None,
     };
 
@@ -321,7 +324,14 @@ impl KeyboardHandler for AppData {
             log::info!("escape key pressed. exiting!");
             self.exit = true;
         }
-        println!("keyboard {event:?}");
+        //TODO: unify common calls with iterating renderers to reduce boilerplate
+        let arc = Arc::clone(&self.renderers);
+        let mut renderers = arc.write().expect("renderers write-lock failed");
+        let iced_event = keypress_event(event, self.modifiers, false);
+        println!("keyboard {iced_event:?}");
+        for renderer in renderers.values_mut() {
+            renderer.key_event(iced_event.clone());
+        }
     }
 
     fn release_key(
@@ -330,8 +340,15 @@ impl KeyboardHandler for AppData {
         _qh: &QueueHandle<Self>,
         _kbd: &wl_keyboard::WlKeyboard,
         _serial: u32,
-        _event: KeyEvent,
+        event: KeyEvent,
     ) {
+        let arc = Arc::clone(&self.renderers);
+        let mut renderers = arc.write().expect("renderers write-lock failed");
+        let iced_event = keypress_event(event, self.modifiers, true);
+        println!("keyboard {iced_event:?}");
+        for renderer in renderers.values_mut() {
+            renderer.key_event(iced_event.clone());
+        }
     }
 
     fn update_modifiers(
@@ -343,7 +360,7 @@ impl KeyboardHandler for AppData {
         modifiers: Modifiers,
         _layout: u32,
     ) {
-        println!("modifiers! {modifiers:?}");
+        self.modifiers = Some(modifiers);
     }
 }
 
@@ -353,9 +370,16 @@ impl PointerHandler for AppData {
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
         _pointer: &wl_pointer::WlPointer,
-        _events: &[PointerEvent],
+        events: &[PointerEvent],
     ) {
-        // println!("pointer events: {events:?}")
+        let arc = Arc::clone(&self.renderers);
+        let mut renderers = arc.write().expect("renderers write-lock failed");
+        let events: Vec<_> = events.into_iter().map(|e| mouse_event(e)).collect();
+        for renderer in renderers.values_mut() {
+            for event in events.iter() {
+                renderer.mouse_event(event.clone());
+            }
+        }
     }
 }
 

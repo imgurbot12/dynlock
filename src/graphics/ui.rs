@@ -1,18 +1,34 @@
 //! Iced UI Implementation
 
+use iced_runtime::core::keyboard;
 use iced_runtime::{program::State, Debug, Font};
 use iced_wgpu::{
-    core::{mouse, renderer, Clipboard, Color, Pixels, Size},
+    core::{mouse, renderer, Clipboard, Color, Event, Length, Pixels, Size},
     graphics::Viewport,
     wgpu, Engine, Renderer,
 };
-use iced_widget::Theme;
+use iced_widget::{container, Column, Theme};
 
 /// Lockscreen UI Implementation
-pub struct UI {}
+pub struct UI {
+    input_id: iced_widget::text_input::Id,
+    input_value: String,
+}
 
-#[derive(Debug, Clone, Copy)]
-pub enum Message {}
+#[derive(Debug, Clone)]
+pub enum Message {
+    Key(String),
+}
+
+impl UI {
+    pub fn new() -> Self {
+        let input_id = iced_widget::text_input::Id::unique();
+        Self {
+            input_id,
+            input_value: "".to_owned(),
+        }
+    }
+}
 
 impl iced_runtime::Program for UI {
     type Theme = iced_wgpu::core::Theme;
@@ -20,10 +36,29 @@ impl iced_runtime::Program for UI {
     type Renderer = iced_wgpu::Renderer;
 
     fn view(&self) -> iced_runtime::core::Element<'_, Self::Message, Self::Theme, Self::Renderer> {
-        iced_widget::text("Hello World!").into()
+        let message = iced_widget::text("Change Da World. My Final Message. Goodbye!");
+        let password = iced_widget::text_input("password", self.input_value.as_str())
+            .id(self.input_id.clone())
+            .width(Length::Fixed(200.0));
+        let menu = Column::new()
+            .push(message)
+            .push(password)
+            .align_items(iced_wgpu::core::Alignment::Center);
+        container(menu)
+            .padding(10)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x()
+            .center_y()
+            .into()
     }
     fn update(&mut self, message: Self::Message) -> iced_runtime::Command<Self::Message> {
-        match message {};
+        match message {
+            Message::Key(_) => {
+                self.input_value += "a";
+                iced_widget::text_input::focus(self.input_id.clone())
+            }
+        }
     }
 }
 
@@ -58,7 +93,7 @@ impl IcedState {
     ) -> Self {
         let debug = Debug::default();
         let engine = Engine::new(&adapter, &device, &queue, format, None);
-        let renderer = Renderer::new(&device, &engine, Font::default(), Pixels::from(16));
+        let renderer = Renderer::new(&device, &engine, Font::default(), Pixels::from(32));
         Self {
             format,
             debug,
@@ -71,11 +106,23 @@ impl IcedState {
     }
 
     pub fn configure(&mut self, width: u32, height: u32) {
-        let ui = UI {};
+        let ui = UI::new();
         let bounds = Size::new(width, height);
-        let bounds2 = Size::new(width as f32, height as f32);
-        self.viewport = Some(Viewport::with_physical_size(bounds, 1.0));
-        self.state = Some(State::new(ui, bounds2, &mut self.renderer, &mut self.debug));
+        let viewport = Viewport::with_physical_size(bounds, 1.0);
+        let size = viewport.logical_size();
+        self.viewport = Some(viewport);
+        self.state = Some(State::new(ui, size, &mut self.renderer, &mut self.debug));
+    }
+
+    pub fn key_event(&mut self, event: keyboard::Event) {
+        let state = self.state.as_mut().unwrap();
+        state.queue_message(Message::Key("".to_owned()));
+        state.queue_event(Event::Keyboard(event));
+    }
+
+    pub fn mouse_event(&mut self, event: mouse::Event) {
+        let state = self.state.as_mut().unwrap();
+        state.queue_event(Event::Mouse(event));
     }
 
     pub fn render(
@@ -95,7 +142,7 @@ impl IcedState {
             &mut self.renderer,
             &Theme::Dark,
             &renderer::Style {
-                text_color: Color::BLACK,
+                text_color: Color::WHITE,
             },
             &mut self.clipboard,
             &mut self.debug,

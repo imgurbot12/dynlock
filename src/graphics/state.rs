@@ -271,6 +271,14 @@ impl<'a> State<'a> {
         self.iced.configure(width, height);
     }
 
+    pub fn key_event(&mut self, event: iced_runtime::core::keyboard::Event) {
+        self.iced.key_event(event);
+    }
+
+    pub fn mouse_event(&mut self, event: iced_runtime::core::mouse::Event) {
+        self.iced.mouse_event(event);
+    }
+
     pub fn render(&mut self) {
         // prepare texture from surface
         let surface_texture = self

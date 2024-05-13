@@ -1,3 +1,4 @@
+mod event;
 mod graphics;
 mod lock;
 
