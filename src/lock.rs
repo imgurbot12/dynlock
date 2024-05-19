@@ -25,7 +25,7 @@ use wayland_client::protocol::{
 };
 use wayland_client::{Connection, Proxy, QueueHandle};
 
-use crate::event::{keypress_event, mouse_event};
+use crate::event::{keypress_event, modifiers_event, mouse_event};
 use crate::graphics::{Screenshot, State};
 
 type RenderersMap = BTreeMap<u32, State<'static>>;
@@ -361,6 +361,13 @@ impl KeyboardHandler for AppData {
         _layout: u32,
     ) {
         self.modifiers = Some(modifiers);
+        let arc = Arc::clone(&self.renderers);
+        let mut renderers = arc.write().expect("renderers write-lock failed");
+        let iced_event = modifiers_event(modifiers);
+        println!("modifiers {iced_event:?}");
+        for renderer in renderers.values_mut() {
+            renderer.key_event(iced_event.clone());
+        }
     }
 }
 

@@ -2,6 +2,7 @@
 
 use iced_runtime::core::keyboard;
 use iced_runtime::{program::State, Debug, Font};
+use iced_wgpu::core::Point;
 use iced_wgpu::{
     core::{mouse, renderer, Clipboard, Color, Event, Length, Pixels, Size},
     graphics::Viewport,
@@ -17,7 +18,7 @@ pub struct UI {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Key(String),
+    EventOccured(Event),
 }
 
 impl UI {
@@ -54,9 +55,9 @@ impl iced_runtime::Program for UI {
     }
     fn update(&mut self, message: Self::Message) -> iced_runtime::Command<Self::Message> {
         match message {
-            Message::Key(_) => {
-                self.input_value += "a";
-                iced_widget::text_input::focus(self.input_id.clone())
+            Message::EventOccured(e) => {
+                println!("event! {e:?}");
+                iced_runtime::Command::none()
             }
         }
     }
@@ -81,6 +82,7 @@ pub struct IcedState {
     viewport: Option<Viewport>,
     debug: Debug,
     state: Option<State<UI>>,
+    cursor: mouse::Cursor,
     clipboard: DummyClipboard,
 }
 
@@ -101,6 +103,7 @@ impl IcedState {
             renderer,
             viewport: None,
             state: None,
+            cursor: mouse::Cursor::Available(Point::new(0.0, 0.0)),
             clipboard: DummyClipboard {},
         }
     }
@@ -110,19 +113,26 @@ impl IcedState {
         let bounds = Size::new(width, height);
         let viewport = Viewport::with_physical_size(bounds, 1.0);
         let size = viewport.logical_size();
+
         self.viewport = Some(viewport);
         self.state = Some(State::new(ui, size, &mut self.renderer, &mut self.debug));
     }
 
     pub fn key_event(&mut self, event: keyboard::Event) {
         let state = self.state.as_mut().unwrap();
-        state.queue_message(Message::Key("".to_owned()));
+        // state.queue_message(Message::Key("".to_owned()));
         state.queue_event(Event::Keyboard(event));
     }
 
     pub fn mouse_event(&mut self, event: mouse::Event) {
         let state = self.state.as_mut().unwrap();
         state.queue_event(Event::Mouse(event));
+        match event {
+            mouse::Event::CursorMoved { position } => {
+                self.cursor = mouse::Cursor::Available(position);
+            }
+            _ => {}
+        }
     }
 
     pub fn render(
@@ -136,9 +146,10 @@ impl IcedState {
         let state = self.state.as_mut().unwrap();
         let viewport = self.viewport.as_ref().unwrap();
         let bounds = viewport.logical_size();
-        state.update(
+        // update iced-runtime program state and render
+        let (events, _) = state.update(
             bounds,
-            mouse::Cursor::Unavailable,
+            self.cursor,
             &mut self.renderer,
             &Theme::Dark,
             &renderer::Style {
@@ -147,6 +158,9 @@ impl IcedState {
             &mut self.clipboard,
             &mut self.debug,
         );
+        if !events.is_empty() {
+            println!("ignored events {events:?}");
+        }
         // complete rendering
         self.renderer.present(
             &mut self.engine,

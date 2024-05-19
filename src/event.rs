@@ -32,18 +32,10 @@ fn key_convert_key(k: Keysym) -> iced_kb::Key {
 fn key_convert_modifiers(m: Option<stk_kb::Modifiers>) -> iced_kb::Modifiers {
     let mut modifiers = iced_kb::Modifiers::default();
     if let Some(mods) = m {
-        if mods.ctrl {
-            modifiers |= iced_kb::Modifiers::CTRL;
-        }
-        if mods.shift {
-            modifiers |= iced_kb::Modifiers::SHIFT;
-        }
-        if mods.alt {
-            modifiers |= iced_kb::Modifiers::ALT;
-        }
-        if mods.logo {
-            modifiers |= iced_kb::Modifiers::LOGO;
-        }
+        modifiers.set(iced_kb::Modifiers::CTRL, mods.ctrl);
+        modifiers.set(iced_kb::Modifiers::SHIFT, mods.shift);
+        modifiers.set(iced_kb::Modifiers::ALT, mods.alt);
+        modifiers.set(iced_kb::Modifiers::LOGO, mods.logo);
     }
     modifiers
 }
@@ -79,6 +71,11 @@ pub fn keypress_event(
             text: event.utf8.map(|s| s.to_smolstr()),
         }
     }
+}
+
+/// Convert Wayland Modifiers-Event to Iced Modifiers-Event
+pub fn modifiers_event(modifiers: stk_kb::Modifiers) -> core_kb::Event {
+    core_kb::Event::ModifiersChanged(key_convert_modifiers(Some(modifiers)))
 }
 
 /// Convert Wayland Mouse-Event into Iced Mouse-Event
