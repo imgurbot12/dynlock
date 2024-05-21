@@ -1,19 +1,21 @@
 //! Iced UI Implementation
-
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use iced_runtime::command::Action;
 use iced_runtime::core::keyboard;
 use iced_runtime::{program::State, Debug, Font};
+
+use iced_wgpu::core::alignment::Vertical;
 use iced_wgpu::core::Point;
+use iced_wgpu::core::{mouse, renderer, Clipboard, Color, Event, Length, Pixels, Size};
+use iced_wgpu::graphics::Viewport;
 use iced_wgpu::Settings;
-use iced_wgpu::{
-    core::{mouse, renderer, Clipboard, Color, Event, Length, Pixels, Size},
-    graphics::Viewport,
-    wgpu, Backend, Renderer,
-};
+use iced_wgpu::{wgpu, Backend, Renderer};
+
 use iced_widget::{container, Column, Theme};
+
+use super::style;
 
 // keyboard handling utilities
 const TAB: keyboard::Key = keyboard::Key::Named(keyboard::key::Named::Tab);
@@ -23,7 +25,6 @@ const HOLD_KEY_TIMEOUT: Duration = Duration::from_millis(200);
 pub struct UI {
     input_id: iced_widget::text_input::Id,
     username: String,
-    realname: String,
     password: String,
     hide_input: bool,
     auth_thread: Option<std::thread::JoinHandle<()>>,
@@ -34,7 +35,6 @@ pub struct UI {
 pub enum Message {
     Typing(String),
     Submit,
-    ToggleHide,
     Focus,
 }
 
@@ -44,13 +44,13 @@ impl UI {
         Self {
             input_id,
             username: whoami::username(),
-            realname: whoami::realname(),
             password: "".to_owned(),
             hide_input: true,
             auth_thread: None,
             authenticated: Arc::new(Mutex::new(false)),
         }
     }
+    /// Check if Authentication Thread is Running
     #[inline]
     fn auth_running(&self) -> bool {
         self.auth_thread
@@ -58,9 +58,11 @@ impl UI {
             .map(|t| !t.is_finished())
             .unwrap_or(false)
     }
+    /// Spawn Authentication Thread (if not already running)
     fn start_authenticate(&mut self) {
         // skip authenticating if already in progress
         if self.auth_running() {
+            log::error!("requested auth while already authenticating");
             return;
         }
         // spawn thread to complete login attempt in background
@@ -80,6 +82,7 @@ impl UI {
             *auth = auth_result;
         }));
     }
+    /// Check if Successfully Authenticated
     #[inline]
     fn is_authenticated(&self) -> bool {
         *self.authenticated.lock().expect("mutex lock failed")
@@ -93,32 +96,32 @@ impl iced_runtime::Program for UI {
 
     fn view(&self) -> iced_runtime::core::Element<'_, Self::Message, Self::Theme, Self::Renderer> {
         // password form
-        let mut password: iced_widget::text_input::TextInput<
-            '_,
-            Self::Message,
-            Self::Theme,
-            Self::Renderer,
-        > = iced_widget::text_input("password", self.password.as_str())
-            .id(self.input_id.clone())
-            .secure(self.hide_input)
-            .width(Length::Fixed(300.0));
+        let mut password =
+            iced_widget::text_input("Type password to unlock...", self.password.as_str())
+                .id(self.input_id.clone())
+                .secure(self.hide_input)
+                .width(Length::Fixed(300.0))
+                .padding(5)
+                .size(12.0)
+                .style(style::password());
         if !self.auth_running() {
             password = password
                 .on_input(Message::Typing)
                 .on_submit(Message::Submit);
         }
         // construct menu
-        let message = iced_widget::text(self.realname.as_str());
+        let now = chrono::Local::now();
+        let message = iced_widget::text(now.format("%H:%M:%S")).size(32.0);
         let menu = Column::new()
             .push(message)
             .push(password)
-            .align_items(iced_wgpu::core::Alignment::Center);
-        container(menu)
-            .padding(10)
+            .align_items(iced_wgpu::core::Alignment::Start);
+        let menu_box = container(menu).padding(10).style(style::menubox());
+        container(menu_box)
+            .padding(25)
             .width(Length::Fill)
             .height(Length::Fill)
-            .center_x()
-            .center_y()
+            .align_y(Vertical::Bottom)
             .into()
     }
     fn update(&mut self, message: Self::Message) -> iced_runtime::Command<Self::Message> {
@@ -131,12 +134,7 @@ impl iced_runtime::Program for UI {
                 self.start_authenticate();
                 iced_runtime::Command::none()
             }
-            Message::ToggleHide => {
-                self.hide_input = !self.hide_input;
-                iced_runtime::Command::none()
-            }
             Message::Focus => {
-                println!("focusing!");
                 iced_widget::text_input::focus(self.input_id.clone())
                 // iced_widget::text_input::move_cursor_to_end(self.input_id.clone())
             }
@@ -148,11 +146,11 @@ struct DummyClipboard {}
 
 impl Clipboard for DummyClipboard {
     fn read(&self, kind: iced_wgpu::core::clipboard::Kind) -> Option<String> {
-        println!("attempting to read from clipboard!");
+        log::debug!("dummy clipboard-read: {kind:?}");
         None
     }
     fn write(&mut self, kind: iced_wgpu::core::clipboard::Kind, contents: String) {
-        println!("write to clipboard: {contents:?}");
+        log::debug!("dummy clipboard-write: {kind:?} {contents:?}");
     }
 }
 
@@ -173,6 +171,7 @@ impl LastKeyTracker {
     }
 }
 
+/// Iced User Interface State Management and Operation
 pub struct IcedState {
     format: wgpu::TextureFormat,
     renderer: Renderer,
@@ -206,6 +205,7 @@ impl IcedState {
         }
     }
 
+    /// Configure State for Given Viewport Size
     pub fn configure(&mut self, width: u32, height: u32) {
         let ui = UI::new();
         let bounds = Size::new(width, height);
@@ -215,6 +215,7 @@ impl IcedState {
         self.state = Some(State::new(ui, size, &mut self.renderer, &mut self.debug));
     }
 
+    /// Supply Keyboard Events to UI
     pub fn key_event(&mut self, event: keyboard::Event) {
         let state = self.state.as_mut().expect("ui state not configured yet");
         match &event {
@@ -232,6 +233,7 @@ impl IcedState {
         state.queue_event(Event::Keyboard(event));
     }
 
+    /// Supply Mouse Events to UI
     pub fn mouse_event(&mut self, event: mouse::Event) {
         let state = self.state.as_mut().expect("ui state not configured yet");
         state.queue_event(Event::Mouse(event));
@@ -243,6 +245,7 @@ impl IcedState {
         }
     }
 
+    /// Check if UI State if Authenticated
     #[inline]
     pub fn is_authenticated(&self) -> bool {
         self.state
@@ -252,6 +255,7 @@ impl IcedState {
             .is_authenticated()
     }
 
+    /// Render UI Frame using WGPU
     pub fn render(
         &mut self,
         device: &wgpu::Device,
@@ -263,6 +267,8 @@ impl IcedState {
         let state = self.state.as_mut().unwrap();
         let viewport = self.viewport.as_ref().unwrap();
         let bounds = viewport.logical_size();
+        // spam focus on password field
+        state.queue_message(Message::Focus);
         // handle backspace repitition
         if let Some(last_key) = self.last_key.as_ref() {
             if last_key.should_repeat() {

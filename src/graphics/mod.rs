@@ -2,6 +2,7 @@
 
 mod screenshot;
 mod state;
+mod style;
 mod ui;
 
 const FRAG_SHADER: &'static str = include_str!("../../shaders/shader.frag");
