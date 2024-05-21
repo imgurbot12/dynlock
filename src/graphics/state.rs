@@ -327,8 +327,8 @@ impl<'a> State<'a> {
         }
         // submit rendering for final generation
         self.iced
-            .render(&self.device, &self.queue, encoder, &texture_view);
-        // self.queue.submit(Some(encoder.finish()));
+            .render(&self.device, &self.queue, &mut encoder, &texture_view);
+        self.queue.submit(Some(encoder.finish()));
         surface_texture.present();
     }
 }

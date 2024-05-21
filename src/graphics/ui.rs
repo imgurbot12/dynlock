@@ -6,14 +6,16 @@ use std::time::{Duration, SystemTime};
 use iced_runtime::core::keyboard;
 use iced_runtime::{program::State, Debug, Font};
 use iced_wgpu::core::Point;
+use iced_wgpu::Settings;
 use iced_wgpu::{
     core::{mouse, renderer, Clipboard, Color, Event, Length, Pixels, Size},
     graphics::Viewport,
-    wgpu, Engine, Renderer,
+    wgpu, Backend, Renderer,
 };
 use iced_widget::{container, Column, Theme};
 
-// backspace handling utilities
+// keyboard handling utilities
+const TAB: keyboard::Key = keyboard::Key::Named(keyboard::key::Named::Tab);
 const BACKSPACE: keyboard::Key = keyboard::Key::Named(keyboard::key::Named::Backspace);
 const BACKSPACE_TIMEOUT: Duration = Duration::from_millis(200);
 const BACKSPACE_EVENT: keyboard::Event = keyboard::Event::KeyPressed {
@@ -39,6 +41,7 @@ pub enum Message {
     Typing(String),
     Submit,
     ToggleHide,
+    Focus,
 }
 
 impl UI {
@@ -90,7 +93,7 @@ impl UI {
 }
 
 impl iced_runtime::Program for UI {
-    type Theme = iced_wgpu::core::Theme;
+    type Theme = Theme;
     type Message = Message;
     type Renderer = iced_wgpu::Renderer;
 
@@ -115,23 +118,26 @@ impl iced_runtime::Program for UI {
             .padding(10)
             .width(Length::Fill)
             .height(Length::Fill)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
+            .center_x()
+            .center_y()
             .into()
     }
     fn update(&mut self, message: Self::Message) -> iced_runtime::Command<Self::Message> {
         match message {
             Message::Typing(e) => {
                 self.password = e;
+                iced_runtime::Command::none()
             }
             Message::Submit => {
                 self.start_authenticate();
+                iced_runtime::Command::none()
             }
             Message::ToggleHide => {
                 self.hide_input = !self.hide_input;
+                iced_runtime::Command::none()
             }
-        };
-        iced_runtime::Command::none()
+            Message::Focus => iced_widget::text_input::focus(self.input_id.clone()),
+        }
     }
 }
 
@@ -149,7 +155,6 @@ impl Clipboard for DummyClipboard {
 
 pub struct IcedState {
     format: wgpu::TextureFormat,
-    engine: Engine,
     renderer: Renderer,
     debug: Debug,
     state: Option<State<UI>>,
@@ -168,12 +173,11 @@ impl IcedState {
         format: wgpu::TextureFormat,
     ) -> Self {
         let debug = Debug::default();
-        let engine = Engine::new(&adapter, &device, &queue, format, None);
-        let renderer = Renderer::new(&device, &engine, Font::default(), Pixels::from(32));
+        let engine = Backend::new(&device, &queue, Settings::default(), format);
+        let renderer = Renderer::new(engine, Font::default(), Pixels::from(32));
         Self {
             format,
             debug,
-            engine,
             renderer,
             viewport: None,
             state: None,
@@ -195,6 +199,9 @@ impl IcedState {
     pub fn key_event(&mut self, event: keyboard::Event) {
         let state = self.state.as_mut().expect("ui state not configured yet");
         match &event {
+            keyboard::Event::KeyPressed { key, .. } if key == &TAB => {
+                state.queue_message(Message::Focus);
+            }
             keyboard::Event::KeyPressed { key, .. } if key == &BACKSPACE => {
                 self.backspace = Some(SystemTime::now());
             }
@@ -230,7 +237,7 @@ impl IcedState {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        mut encoder: wgpu::CommandEncoder,
+        encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
     ) {
         // update rendering with contents
@@ -257,17 +264,19 @@ impl IcedState {
             &mut self.debug,
         );
         // complete rendering
-        self.renderer.present(
-            &mut self.engine,
-            &device,
-            &queue,
-            &mut encoder,
-            None,
-            self.format,
-            &view,
-            &viewport,
-            &self.debug.overlay(),
-        );
-        self.engine.submit(&queue, encoder);
+        self.renderer.with_primitives(|backend, primitive| {
+            backend.present(
+                &device,
+                &queue,
+                encoder,
+                None,
+                self.format,
+                &view,
+                primitive,
+                &viewport,
+                &self.debug.overlay(),
+            )
+        });
+        // self.engine.submit(&queue, encoder);
     }
 }

@@ -261,6 +261,7 @@ impl SeatHandler for AppData {
             seat_object.keyboard.replace(keyboard);
         }
         if capability == Capability::Pointer && self.pointer.is_none() {
+            println!("pointer?");
             let pointer = self
                 .seat_state
                 .get_pointer(qh, &seat)
