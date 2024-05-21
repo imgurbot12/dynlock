@@ -11,11 +11,12 @@ calloop = { version = "0.13.0" }
 env_logger = "0.11.2"
 futures-intrusive = "0.5.0"
 iced_runtime = { git = "https://github.com/iced-rs/iced", version = "0.13.0-dev" }
-iced_wgpu = { git = "https://github.com/iced-rs/iced", version = "0.13.0-dev" }
-iced_widget = { git = "https://github.com/iced-rs/iced", version = "0.13.0-dev" }
+iced_wgpu = { git = "https://github.com/iced-rs/iced", version = "0.13.0-dev", features = ["image"] }
+iced_widget = { git = "https://github.com/iced-rs/iced", version = "0.13.0-dev", features = ["image"] }
 image = { version = "0.24.9", features = ["png", "jpeg"], default-features = false }
 libwayshot = "0.3.0"
 log = "0.4.21"
+pam = "0.8.0"
 pollster = "0.3.0"
 raw-window-handle = "0.6.1"
 renderdoc = { version = "0.12.1", default-features = false }

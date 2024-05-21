@@ -279,6 +279,11 @@ impl<'a> State<'a> {
         self.iced.mouse_event(event);
     }
 
+    #[inline]
+    pub fn is_authenticated(&self) -> bool {
+        return self.iced.is_authenticated();
+    }
+
     pub fn render(&mut self) {
         // prepare texture from surface
         let surface_texture = self

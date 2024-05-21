@@ -1,5 +1,6 @@
 //! Iced UI Implementation
 
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use iced_runtime::core::keyboard;
@@ -12,7 +13,7 @@ use iced_wgpu::{
 };
 use iced_widget::{container, Column, Theme};
 
-// reference to backspace key definition
+// backspace handling utilities
 const BACKSPACE: keyboard::Key = keyboard::Key::Named(keyboard::key::Named::Backspace);
 const BACKSPACE_TIMEOUT: Duration = Duration::from_millis(200);
 const BACKSPACE_EVENT: keyboard::Event = keyboard::Event::KeyPressed {
@@ -25,14 +26,19 @@ const BACKSPACE_EVENT: keyboard::Event = keyboard::Event::KeyPressed {
 /// Lockscreen UI Implementation
 pub struct UI {
     input_id: iced_widget::text_input::Id,
+    username: String,
     realname: String,
-    input_value: String,
+    password: String,
+    hide_input: bool,
+    auth_thread: Option<std::thread::JoinHandle<()>>,
+    authenticated: Arc<Mutex<bool>>,
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
     Typing(String),
     Submit,
+    ToggleHide,
 }
 
 impl UI {
@@ -40,9 +46,46 @@ impl UI {
         let input_id = iced_widget::text_input::Id::unique();
         Self {
             input_id,
+            username: whoami::username(),
             realname: whoami::realname(),
-            input_value: "".to_owned(),
+            password: "".to_owned(),
+            hide_input: true,
+            auth_thread: None,
+            authenticated: Arc::new(Mutex::new(false)),
         }
+    }
+    #[inline]
+    fn auth_running(&self) -> bool {
+        self.auth_thread
+            .as_ref()
+            .map(|t| !t.is_finished())
+            .unwrap_or(false)
+    }
+    fn start_authenticate(&mut self) {
+        // skip authenticating if already in progress
+        if self.auth_running() {
+            return;
+        }
+        // spawn thread to complete login attempt in background
+        let username = self.username.to_owned();
+        let password = self.password.to_owned();
+        let authenticated = Arc::clone(&self.authenticated);
+        self.auth_thread = Some(std::thread::spawn(move || {
+            // attempt login via pam
+            let mut client =
+                pam::Client::with_password("system-auth").expect("Failed to init PAM client.");
+            client
+                .conversation_mut()
+                .set_credentials(username, password);
+            let auth_result = client.authenticate().is_ok();
+            // update authentication status
+            let mut auth = authenticated.lock().expect("mutex lock failed");
+            *auth = auth_result;
+        }));
+    }
+    #[inline]
+    fn is_authenticated(&self) -> bool {
+        *self.authenticated.lock().expect("mutex lock failed")
     }
 }
 
@@ -52,12 +95,18 @@ impl iced_runtime::Program for UI {
     type Renderer = iced_wgpu::Renderer;
 
     fn view(&self) -> iced_runtime::core::Element<'_, Self::Message, Self::Theme, Self::Renderer> {
-        let message = iced_widget::text(self.realname.as_str());
-        let password = iced_widget::text_input("password", self.input_value.as_str())
+        // password form
+        let mut password = iced_widget::text_input("password", self.password.as_str())
             .id(self.input_id.clone())
-            .on_input(Message::Typing)
-            .on_submit(Message::Submit)
+            .secure(self.hide_input)
             .width(Length::Fixed(300.0));
+        if !self.auth_running() {
+            password = password
+                .on_input(Message::Typing)
+                .on_submit(Message::Submit);
+        }
+        // construct menu
+        let message = iced_widget::text(self.realname.as_str());
         let menu = Column::new()
             .push(message)
             .push(password)
@@ -66,17 +115,20 @@ impl iced_runtime::Program for UI {
             .padding(10)
             .width(Length::Fill)
             .height(Length::Fill)
-            .center_x()
-            .center_y()
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
             .into()
     }
     fn update(&mut self, message: Self::Message) -> iced_runtime::Command<Self::Message> {
         match message {
             Message::Typing(e) => {
-                self.input_value = e;
+                self.password = e;
             }
             Message::Submit => {
-                println!("submit: {:?}", self.input_value);
+                self.start_authenticate();
+            }
+            Message::ToggleHide => {
+                self.hide_input = !self.hide_input;
             }
         };
         iced_runtime::Command::none()
@@ -163,6 +215,15 @@ impl IcedState {
             }
             _ => {}
         }
+    }
+
+    #[inline]
+    pub fn is_authenticated(&self) -> bool {
+        self.state
+            .as_ref()
+            .expect("ui state not configured yet")
+            .program()
+            .is_authenticated()
     }
 
     pub fn render(

@@ -153,6 +153,9 @@ pub fn runlock() {
                 let mut renderers = arc.write().expect("renderer write lock failed");
                 for renderer in renderers.values_mut() {
                     renderer.render();
+                    if renderer.is_authenticated() {
+                        app_data.exit = true
+                    }
                 }
                 TimeoutAction::ToDuration(Duration::from_millis(dist))
             },
@@ -328,7 +331,7 @@ impl KeyboardHandler for AppData {
         let arc = Arc::clone(&self.renderers);
         let mut renderers = arc.write().expect("renderers write-lock failed");
         let iced_event = keypress_event(event, self.modifiers, false);
-        println!("keyboard {iced_event:?}");
+        // println!("keyboard {iced_event:?}");
         for renderer in renderers.values_mut() {
             renderer.key_event(iced_event.clone());
         }
@@ -345,7 +348,7 @@ impl KeyboardHandler for AppData {
         let arc = Arc::clone(&self.renderers);
         let mut renderers = arc.write().expect("renderers write-lock failed");
         let iced_event = keypress_event(event, self.modifiers, true);
-        println!("keyboard {iced_event:?}");
+        // println!("keyboard {iced_event:?}");
         for renderer in renderers.values_mut() {
             renderer.key_event(iced_event.clone());
         }
@@ -364,7 +367,7 @@ impl KeyboardHandler for AppData {
         let arc = Arc::clone(&self.renderers);
         let mut renderers = arc.write().expect("renderers write-lock failed");
         let iced_event = modifiers_event(modifiers);
-        println!("modifiers {iced_event:?}");
+        //  println!("modifiers {iced_event:?}");
         for renderer in renderers.values_mut() {
             renderer.key_event(iced_event.clone());
         }
