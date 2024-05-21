@@ -19,6 +19,10 @@ fn key_convert_key(k: Keysym) -> iced_kb::Key {
         Keysym::End => Key::Named(Named::End),
         Keysym::Page_Up => Key::Named(Named::PageUp),
         Keysym::Page_Down => Key::Named(Named::PageDown),
+        Keysym::Up => Key::Named(Named::ArrowUp),
+        Keysym::Down => Key::Named(Named::ArrowDown),
+        Keysym::Left => Key::Named(Named::ArrowLeft),
+        Keysym::Right => Key::Named(Named::ArrowRight),
         _ => match k.key_char() {
             Some(c) => Key::Character(c.to_smolstr()),
             None => {

@@ -3,6 +3,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
+use iced_runtime::command::Action;
 use iced_runtime::core::keyboard;
 use iced_runtime::{program::State, Debug, Font};
 use iced_wgpu::core::Point;
@@ -16,14 +17,7 @@ use iced_widget::{container, Column, Theme};
 
 // keyboard handling utilities
 const TAB: keyboard::Key = keyboard::Key::Named(keyboard::key::Named::Tab);
-const BACKSPACE: keyboard::Key = keyboard::Key::Named(keyboard::key::Named::Backspace);
-const BACKSPACE_TIMEOUT: Duration = Duration::from_millis(200);
-const BACKSPACE_EVENT: keyboard::Event = keyboard::Event::KeyPressed {
-    key: BACKSPACE,
-    location: keyboard::Location::Standard,
-    modifiers: keyboard::Modifiers::empty(),
-    text: None,
-};
+const HOLD_KEY_TIMEOUT: Duration = Duration::from_millis(200);
 
 /// Lockscreen UI Implementation
 pub struct UI {
@@ -99,7 +93,12 @@ impl iced_runtime::Program for UI {
 
     fn view(&self) -> iced_runtime::core::Element<'_, Self::Message, Self::Theme, Self::Renderer> {
         // password form
-        let mut password = iced_widget::text_input("password", self.password.as_str())
+        let mut password: iced_widget::text_input::TextInput<
+            '_,
+            Self::Message,
+            Self::Theme,
+            Self::Renderer,
+        > = iced_widget::text_input("password", self.password.as_str())
             .id(self.input_id.clone())
             .secure(self.hide_input)
             .width(Length::Fixed(300.0));
@@ -136,7 +135,11 @@ impl iced_runtime::Program for UI {
                 self.hide_input = !self.hide_input;
                 iced_runtime::Command::none()
             }
-            Message::Focus => iced_widget::text_input::focus(self.input_id.clone()),
+            Message::Focus => {
+                println!("focusing!");
+                iced_widget::text_input::focus(self.input_id.clone())
+                // iced_widget::text_input::move_cursor_to_end(self.input_id.clone())
+            }
         }
     }
 }
@@ -153,6 +156,23 @@ impl Clipboard for DummyClipboard {
     }
 }
 
+struct LastKeyTracker {
+    pub keypress: keyboard::Event,
+    time: SystemTime,
+}
+
+impl LastKeyTracker {
+    fn new(keypress: keyboard::Event) -> Self {
+        let time = SystemTime::now();
+        Self { keypress, time }
+    }
+    #[inline]
+    fn should_repeat(&self) -> bool {
+        let now = SystemTime::now();
+        now.duration_since(self.time).unwrap() >= HOLD_KEY_TIMEOUT
+    }
+}
+
 pub struct IcedState {
     format: wgpu::TextureFormat,
     renderer: Renderer,
@@ -161,13 +181,12 @@ pub struct IcedState {
     viewport: Option<Viewport>,
     cursor: mouse::Cursor,
     clipboard: DummyClipboard,
-    // hack for holding down backspace
-    backspace: Option<SystemTime>,
+    last_key: Option<LastKeyTracker>,
 }
 
 impl IcedState {
     pub fn new(
-        adapter: &wgpu::Adapter,
+        _adapter: &wgpu::Adapter,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
@@ -183,7 +202,7 @@ impl IcedState {
             state: None,
             cursor: mouse::Cursor::Available(Point::new(0.0, 0.0)),
             clipboard: DummyClipboard {},
-            backspace: None,
+            last_key: None,
         }
     }
 
@@ -202,11 +221,11 @@ impl IcedState {
             keyboard::Event::KeyPressed { key, .. } if key == &TAB => {
                 state.queue_message(Message::Focus);
             }
-            keyboard::Event::KeyPressed { key, .. } if key == &BACKSPACE => {
-                self.backspace = Some(SystemTime::now());
+            keyboard::Event::KeyPressed { .. } => {
+                self.last_key = Some(LastKeyTracker::new(event.to_owned()));
             }
-            keyboard::Event::KeyReleased { key, .. } if key == &BACKSPACE => {
-                self.backspace = None;
+            keyboard::Event::KeyReleased { .. } => {
+                self.last_key = None;
             }
             _ => {}
         }
@@ -245,14 +264,13 @@ impl IcedState {
         let viewport = self.viewport.as_ref().unwrap();
         let bounds = viewport.logical_size();
         // handle backspace repitition
-        let now = SystemTime::now();
-        if let Some(backspace) = self.backspace {
-            if now.duration_since(backspace).unwrap() >= BACKSPACE_TIMEOUT {
-                state.queue_event(Event::Keyboard(BACKSPACE_EVENT));
+        if let Some(last_key) = self.last_key.as_ref() {
+            if last_key.should_repeat() {
+                state.queue_event(Event::Keyboard(last_key.keypress.to_owned()));
             }
         }
         // update iced-runtime program state and render
-        let _ = state.update(
+        let (_, command) = state.update(
             bounds,
             self.cursor,
             &mut self.renderer,
@@ -261,6 +279,25 @@ impl IcedState {
                 text_color: Color::WHITE,
             },
             &mut self.clipboard,
+            &mut self.debug,
+        );
+        // collect operable events from commands
+        let mut operations = Vec::new();
+        if let Some(actions) = command.map(|c| c.actions()) {
+            for action in actions {
+                match action {
+                    Action::Widget(op) => operations.push(op),
+                    action => {
+                        log::debug!("ui ignoring action {action:?}");
+                    }
+                }
+            }
+        }
+        // complete operations (if any)
+        state.operate(
+            &mut self.renderer,
+            operations.into_iter(),
+            bounds,
             &mut self.debug,
         );
         // complete rendering
