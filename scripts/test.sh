@@ -13,7 +13,7 @@ run_sway() {
 case "$1" in
   "run")
     cd $LOCAL/..
-    $LOCAL/../target/debug/shaderlock $FLAGS
+    $LOCAL/../target/debug/dynlock $FLAGS
     swaymsg exit
     ;;
   *)

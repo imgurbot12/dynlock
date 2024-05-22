@@ -206,9 +206,13 @@ impl SessionLockHandler for AppData {
             let lock_surface = session_lock.create_lock_surface(surface, &output, qh);
             // generate wgpu renderer for surface
             let key = lock_surface.wl_surface().id().protocol_id();
-            let rgba = self.background.clone();
-            let renderer =
-                pollster::block_on(State::new(conn, rgba, &self.settings.shader, &lock_surface));
+            let renderer = pollster::block_on(State::new(
+                conn,
+                self.background.clone(),
+                &self.settings.shader,
+                self.settings.lock,
+                &lock_surface,
+            ));
             match renderer {
                 Ok(renderer) => {
                     renderers.insert(key, renderer);
@@ -347,8 +351,8 @@ impl KeyboardHandler for AppData {
         _serial: u32,
         event: KeyEvent,
     ) {
-        if event.keysym == Keysym::Escape {
-            log::info!("escape key pressed. exiting!");
+        if !self.settings.lock {
+            log::info!("key pressed. exiting screensaver mode!");
             self.exit = true;
         }
         let iced_event = keypress_event(event, self.modifiers, false);

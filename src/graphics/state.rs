@@ -63,7 +63,7 @@ pub struct State<'a> {
     bind_group: wgpu::BindGroup,
     surface: wgpu::Surface<'a>,
     context: RenderContext,
-    iced: IcedState,
+    iced: Option<IcedState>,
 }
 
 impl<'a> State<'a> {
@@ -72,6 +72,7 @@ impl<'a> State<'a> {
         conn: &Connection,
         rgba: Background,
         shader: &str,
+        lock: bool,
         lock_surface: &SessionLockSurface,
     ) -> Result<Self> {
         // spawn wgpu instance
@@ -260,7 +261,10 @@ impl<'a> State<'a> {
             },
         });
         // spawn iced components
-        let iced = IcedState::new(&adapter, &device, &queue, texture_format);
+        let iced = match lock {
+            true => Some(IcedState::new(&adapter, &device, &queue, texture_format)),
+            false => None,
+        };
         // return compiled state object
         Ok(Self {
             format: texture_format,
@@ -291,25 +295,34 @@ impl<'a> State<'a> {
         self.context.width = width as usize;
         self.context.height = height as usize;
         self.surface.configure(&self.device, &surface_config);
-        self.iced.configure(width, height);
+        if let Some(iced) = self.iced.as_mut() {
+            iced.configure(width, height);
+        }
     }
 
     /// Pass Keyboard Event to Iced UI Instance
     #[inline]
     pub fn key_event(&mut self, event: iced_runtime::core::keyboard::Event) {
-        self.iced.key_event(event);
+        if let Some(iced) = self.iced.as_mut() {
+            iced.key_event(event);
+        }
     }
 
     /// Pass Mouse Event to Iced UI Instance
     #[inline]
     pub fn mouse_event(&mut self, event: iced_runtime::core::mouse::Event) {
-        self.iced.mouse_event(event);
+        if let Some(iced) = self.iced.as_mut() {
+            iced.mouse_event(event);
+        }
     }
 
     /// Check if UI has Completed Authentication
     #[inline]
     pub fn is_authenticated(&self) -> bool {
-        return self.iced.is_authenticated();
+        self.iced
+            .as_ref()
+            .map(|iced| iced.is_authenticated())
+            .unwrap_or(false)
     }
 
     /// Complete Frame Rendering of Entire Graphics Scene
@@ -355,8 +368,9 @@ impl<'a> State<'a> {
             render_pass.draw(0..6, 0..1);
         }
         // submit rendering for final generation
-        self.iced
-            .render(&self.device, &self.queue, &mut encoder, &texture_view);
+        if let Some(iced) = self.iced.as_mut() {
+            iced.render(&self.device, &self.queue, &mut encoder, &texture_view);
+        }
         self.queue.submit(Some(encoder.finish()));
         surface_texture.present();
     }

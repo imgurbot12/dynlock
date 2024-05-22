@@ -1,0 +1,4 @@
+---
+lock: true
+shader: ~/.config/dynlock/shaders
+background: null

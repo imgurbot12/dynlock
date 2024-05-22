@@ -23,7 +23,10 @@ pam = "0.8.0"
 pollster = "0.3.0"
 rand = "0.8.5"
 raw-window-handle = "0.6.1"
+serde = { version = "1.0.202", features = ["derive"] }
+serde_yaml = "0.9.34"
 shaderc = "0.8.3"
+shellexpand = "3.1.0"
 smol_str = "0.2.1"
 wayland-backend = { version = "0.3.3", features = ["client_system"] }
 wayland-client = { version = "0.31.2" }

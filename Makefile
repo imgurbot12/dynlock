@@ -17,6 +17,7 @@ build:
 install: build
 	mkdir -p ${DEST}
 	cp -fr shaders ${DEST}/.
+	cp -f default-config.yaml ${DEST}/config.yaml
 	sudo install target/release/dynlock /usr/local/bin/.
 
 uninstall:

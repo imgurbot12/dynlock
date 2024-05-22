@@ -10,18 +10,25 @@ mod event;
 mod graphics;
 mod lock;
 
-use crate::config::Settings;
+use crate::config::{Config, Settings};
 
 const XDG_PREFIX: &'static str = "dynlock";
+const DEFAULT_CONFIG: &'static str = "config.yaml";
 
 #[derive(Debug, Clone, Parser)]
 struct Cli {
-    /// Fragment Shader File/Search-Directory for Lockscreen
+    /// Dynlock configuration filepath
     #[clap(short, long)]
-    shader: Option<PathBuf>,
-    /// Background Image/Search-Directory for LockScreen
+    config: Option<String>,
+    /// Fragment shader file/search-directory
     #[clap(short, long)]
-    background: Option<PathBuf>,
+    shader: Option<String>,
+    /// Background image/search-directory
+    #[clap(short, long)]
+    background: Option<String>,
+    /// Screensaver mode does not lock
+    #[clap(long)]
+    screensave: Option<bool>,
 }
 
 impl Cli {
@@ -50,27 +57,56 @@ impl Cli {
             p.to_owned()
         })
     }
+    /// Find PathBuf from Option or Use XDG to Find Default
+    fn find_config_path(path: Option<String>, default_name: &str) -> PathBuf {
+        path.clone()
+            .map(|v| shellexpand::tilde(&v.to_string()).to_string())
+            .map(|v| PathBuf::from(v))
+            .unwrap_or_else(|| {
+                xdg::BaseDirectories::with_prefix(XDG_PREFIX)
+                    .expect("failed to read xdg base-dirs")
+                    .get_config_file(default_name)
+            })
+    }
     /// Prepare CLI Flags for Use and Generate Settings
-    pub fn settings(mut self) -> Result<Settings> {
-        // attempt to resolve shader/background filepaths
-        let fragpath = self.shader.clone().unwrap_or_else(|| {
-            xdg::BaseDirectories::with_prefix(XDG_PREFIX)
-                .expect("failed to read xdg base-dirs")
-                .get_config_file("shaders")
-        });
+    pub fn settings(self) -> Result<Settings> {
+        // read configuration file according to settings
+        let cfgpath = Self::find_config_path(self.config, DEFAULT_CONFIG);
+        let config = match cfgpath.exists() {
+            true => {
+                log::info!("reading configuration: {cfgpath:?}");
+                let cfgdata = std::fs::read_to_string(&cfgpath).context("failed to read config")?;
+                serde_yaml::from_str(&cfgdata).context("failed to parse config")?
+            }
+            false => {
+                log::warn!("config: {cfgpath:?} does not exist. using default");
+                Config::default()
+            }
+        };
+        // resolve fragment shader path
+        let shader = self.shader.or(config.shader);
+        let fragpath = Self::find_config_path(shader, "shaders");
         let fragment = Self::find_file(&fragpath, vec!["glsl"]).context("failed to find shader")?;
         log::info!("loading fragment shader: {fragment:?}");
-        if let Some(background) = self.background.as_ref() {
-            let bpath = Self::find_file(background, vec!["png", "jpg", "jpeg"])
+        // resolve background image path
+        let mut background = self.background.or(config.background).map(PathBuf::from);
+        if let Some(bg) = background {
+            let bpath = Self::find_file(&bg, vec!["png", "jpg", "jpeg"])
                 .context("failed to find background")?;
             log::info!("loading background image: {bpath:?}");
-            self.background = Some(bpath);
+            background = Some(bpath);
         }
-        // load Shader from File (if present)
+        // load Shader from file (if present)
         let shader = std::fs::read_to_string(fragment).context("failed to read shader file")?;
+        let lock = !self.screensave.unwrap_or(!config.lock);
+        match lock {
+            true => log::info!("running in screensaver mode!"),
+            false => log::info!("running in lockscreen mode!"),
+        }
         Ok(Settings {
+            lock,
             shader,
-            background: self.background,
+            background,
         })
     }
 }
