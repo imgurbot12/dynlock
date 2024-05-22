@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use calloop::{EventLoop, LoopHandle};
+use calloop::EventLoop;
 use smithay_client_toolkit::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
 
@@ -38,7 +38,6 @@ struct SeatObject {
 
 struct AppData {
     exit: bool,
-    loop_handle: LoopHandle<'static, Self>,
     // common compositer components
     conn: Connection,
     compositor_state: CompositorState,
@@ -60,24 +59,23 @@ struct AppData {
     pointer: Option<wl_pointer::WlPointer>,
 }
 
-// general flow
-//
-// 1. prepare wgpu elements and pass to AppData
-// 2. prepare lock elements and pass to AppData
-// 3. assign lock-surfaces and elements during lock generation in `locked`
-// 4. begin drawing after `configure`. wgpu renders to its own interal surface
-//    before copying bytes back into lock-surfaces each tick
-//
-// webviews don't support any means of rendering directly via wgpu or accessing/
-// replacing the underlying wayland windows/surfaces.
-//
-// consider using iced_wgpu to integrate directly via wgpu-layer for basic ui
-// integration on top of generated shaders
-// https://github.com/iced-rs/iced/blob/master/examples/integration/src/main.rs
-//
-// the first test should simply be rendering something basic with wgpu
-// onto the lockscreen. checking if a steady animation works well at high-fps
-// and moving onto more advanced methods from there.
+impl AppData {
+    /// Function Wrapper to Run Against A Single Renderer
+    fn modify(&mut self, key: u32, f: impl FnOnce(&mut State<'static>)) {
+        let arc = Arc::clone(&self.renderers);
+        let mut renderers = arc.write().expect("renderers modify failed");
+        let renderer = renderers.get_mut(&key).expect("invalid renderer");
+        f(renderer)
+    }
+    // Function Wrapper to Run Against All Renderer Objects
+    fn modify_all(&mut self, f: impl Fn(&mut State<'static>)) {
+        let arc = Arc::clone(&self.renderers);
+        let mut renderers = arc.write().expect("renderers modify-all failed");
+        for renderer in renderers.values_mut() {
+            f(renderer);
+        }
+    }
+}
 
 pub fn runlock() {
     env_logger::init();
@@ -109,7 +107,6 @@ pub fn runlock() {
 
     let mut app_data = AppData {
         exit: false,
-        loop_handle: event_loop.handle(),
         // compositor components
         conn: conn.clone(),
         compositor_state: CompositorState::bind(&globals, &qh).unwrap(),
@@ -142,7 +139,7 @@ pub fn runlock() {
         .insert(event_loop.handle())
         .unwrap();
 
-    let fps = 30;
+    let fps = 60;
     let dist = 1000 / fps;
     let handle = event_loop.handle();
     handle
@@ -215,15 +212,11 @@ impl SessionLockHandler for AppData {
         _serial: u32,
     ) {
         let (width, height) = configure.new_size;
-
-        // let wgpu = pollster::block_on(State::new(conn.clone()));
-
-        let arc = Arc::clone(&self.renderers);
         let key = session_lock_surface.wl_surface().id().protocol_id();
-        let mut renderers = arc.write().expect("renderer write lock failed");
-        let renderer = renderers.get_mut(&key).unwrap();
-        renderer.configure(width, height);
-        renderer.render();
+        self.modify(key, move |r| {
+            r.configure(width, height);
+            r.render();
+        });
     }
 }
 
@@ -253,6 +246,7 @@ impl SeatHandler for AppData {
             }
         };
         if capability == Capability::Keyboard && self.keyboard.is_none() {
+            log::debug!("wayland - assigning keyboard seat");
             let keyboard = self
                 .seat_state
                 .get_keyboard(qh, &seat, None)
@@ -261,7 +255,7 @@ impl SeatHandler for AppData {
             seat_object.keyboard.replace(keyboard);
         }
         if capability == Capability::Pointer && self.pointer.is_none() {
-            println!("pointer?");
+            log::debug!("wayland - assigning pointer seat");
             let pointer = self
                 .seat_state
                 .get_pointer(qh, &seat)
@@ -279,11 +273,11 @@ impl SeatHandler for AppData {
         capability: Capability,
     ) {
         if capability == Capability::Keyboard && self.keyboard.is_some() {
-            println!("Unset keyboard capability");
+            log::debug!("wayland - unset keyboard capability");
             self.keyboard.take().unwrap().release();
         }
         if capability == Capability::Pointer && self.pointer.is_some() {
-            println!("Unset pointer capability");
+            log::debug!("wayland - unset pointer capability");
             self.pointer.take().unwrap().release();
         }
     }
@@ -302,7 +296,7 @@ impl KeyboardHandler for AppData {
         _: &[u32],
         _keysyms: &[Keysym],
     ) {
-        println!("keyboard enter!");
+        log::debug!("wayland - keyboard enter");
     }
 
     fn leave(
@@ -313,7 +307,7 @@ impl KeyboardHandler for AppData {
         _surface: &wl_surface::WlSurface,
         _: u32,
     ) {
-        println!("keyboard exit!");
+        log::debug!("wayland - keyboard exit");
     }
 
     fn press_key(
@@ -328,14 +322,8 @@ impl KeyboardHandler for AppData {
             log::info!("escape key pressed. exiting!");
             self.exit = true;
         }
-        //TODO: unify common calls with iterating renderers to reduce boilerplate
-        let arc = Arc::clone(&self.renderers);
-        let mut renderers = arc.write().expect("renderers write-lock failed");
         let iced_event = keypress_event(event, self.modifiers, false);
-        // println!("keyboard {iced_event:?}");
-        for renderer in renderers.values_mut() {
-            renderer.key_event(iced_event.clone());
-        }
+        self.modify_all(|r| r.key_event(iced_event.clone()))
     }
 
     fn release_key(
@@ -346,13 +334,8 @@ impl KeyboardHandler for AppData {
         _serial: u32,
         event: KeyEvent,
     ) {
-        let arc = Arc::clone(&self.renderers);
-        let mut renderers = arc.write().expect("renderers write-lock failed");
         let iced_event = keypress_event(event, self.modifiers, true);
-        // println!("keyboard {iced_event:?}");
-        for renderer in renderers.values_mut() {
-            renderer.key_event(iced_event.clone());
-        }
+        self.modify_all(|r| r.key_event(iced_event.clone()))
     }
 
     fn update_modifiers(
@@ -365,13 +348,8 @@ impl KeyboardHandler for AppData {
         _layout: u32,
     ) {
         self.modifiers = Some(modifiers);
-        let arc = Arc::clone(&self.renderers);
-        let mut renderers = arc.write().expect("renderers write-lock failed");
         let iced_event = modifiers_event(modifiers);
-        //  println!("modifiers {iced_event:?}");
-        for renderer in renderers.values_mut() {
-            renderer.key_event(iced_event.clone());
-        }
+        self.modify_all(|r| r.key_event(iced_event.clone()))
     }
 }
 
@@ -383,14 +361,12 @@ impl PointerHandler for AppData {
         _pointer: &wl_pointer::WlPointer,
         events: &[PointerEvent],
     ) {
-        let arc = Arc::clone(&self.renderers);
-        let mut renderers = arc.write().expect("renderers write-lock failed");
         let events: Vec<_> = events.into_iter().map(|e| mouse_event(e)).collect();
-        for renderer in renderers.values_mut() {
+        self.modify_all(|r| {
             for event in events.iter() {
-                renderer.mouse_event(event.clone());
+                r.mouse_event(event.clone());
             }
-        }
+        })
     }
 }
 

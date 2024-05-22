@@ -2,10 +2,12 @@
 use iced_widget::core::{Background, Border, Color};
 use iced_widget::{container, text_input, theme, Theme};
 
+/// Generate Password TextInput Theme
 pub fn password() -> theme::TextInput {
     theme::TextInput::Custom(Box::new(PasswordStyle {}))
 }
 
+/// Generate MenuBox Container Theme
 pub fn menubox() -> theme::Container {
     theme::Container::Custom(Box::new(MenuBoxStyle {}))
 }
@@ -16,7 +18,7 @@ struct PasswordStyle {}
 impl text_input::StyleSheet for PasswordStyle {
     type Style = Theme;
 
-    fn active(&self, style: &Self::Style) -> text_input::Appearance {
+    fn active(&self, _style: &Self::Style) -> text_input::Appearance {
         let blank = Color::TRANSPARENT;
         let text_color = Color::WHITE;
         text_input::Appearance {
@@ -34,16 +36,16 @@ impl text_input::StyleSheet for PasswordStyle {
     fn disabled(&self, style: &Self::Style) -> text_input::Appearance {
         self.active(style)
     }
-    fn value_color(&self, style: &Self::Style) -> Color {
+    fn value_color(&self, _style: &Self::Style) -> Color {
         Color::WHITE
     }
-    fn disabled_color(&self, style: &Self::Style) -> Color {
+    fn disabled_color(&self, _style: &Self::Style) -> Color {
         Color::BLACK
     }
-    fn selection_color(&self, style: &Self::Style) -> Color {
+    fn selection_color(&self, _style: &Self::Style) -> Color {
         Color::WHITE
     }
-    fn placeholder_color(&self, style: &Self::Style) -> Color {
+    fn placeholder_color(&self, _style: &Self::Style) -> Color {
         Color::WHITE
     }
 }
