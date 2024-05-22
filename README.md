@@ -2,6 +2,10 @@
 
 Dynamic and Configurable Lockscreen with Customizable UI and Shader Support
 
+This libraries foundation builds heavily on the concepts and design
+in [RobinMcCorkell's Shaderlock](https://github.com/RobinMcCorkell/shaderlock)
+so credit to him for his original creation.
+
 ### Features
   - Blazingly Fast 🔥
   - Simple and Easy to Use
