@@ -40,3 +40,21 @@ View all available options via the built-in help:
 ```bash
 $ dynlock --help
 ```
+
+### Screenshots
+
+#### Frost
+
+![frost](./screenshots/frost.png)
+
+#### Paper Burn
+
+![paper-burn](./screenshots/paper-burn.png)
+
+#### Floating Orb
+
+![orb](./screenshots/orb.png)
+
+#### Matrix
+
+![matrix](./screenshots/matrix.png)
