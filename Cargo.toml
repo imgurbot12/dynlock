@@ -6,9 +6,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = "1.0.86"
 bytemuck = "1.15.0"
 calloop = { version = "0.13.0" }
 chrono = "0.4.38"
+clap = { version = "4.5.4", features = ["derive"] }
 env_logger = "0.11.2"
 futures-intrusive = "0.5.0"
 iced_runtime = "0.12.1"
@@ -19,6 +21,7 @@ libwayshot = "0.3.0"
 log = "0.4.21"
 pam = "0.8.0"
 pollster = "0.3.0"
+rand = "0.8.5"
 raw-window-handle = "0.6.1"
 shaderc = "0.8.3"
 smol_str = "0.2.1"

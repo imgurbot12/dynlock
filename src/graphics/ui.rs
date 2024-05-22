@@ -190,6 +190,7 @@ impl IcedState {
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
     ) -> Self {
+        log::debug!("iced - building initial ui state");
         let debug = Debug::default();
         let engine = Backend::new(&device, &queue, Settings::default(), format);
         let renderer = Renderer::new(engine, Font::default(), Pixels::from(32));
@@ -207,6 +208,7 @@ impl IcedState {
 
     /// Configure State for Given Viewport Size
     pub fn configure(&mut self, width: u32, height: u32) {
+        log::debug!("iced - configuing viewports from surface ({width}/{height})");
         let ui = UI::new();
         let bounds = Size::new(width, height);
         let viewport = Viewport::with_physical_size(bounds, 1.0);

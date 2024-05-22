@@ -3,6 +3,8 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
+use anyhow::{anyhow, Context, Result};
+
 use calloop::EventLoop;
 use smithay_client_toolkit::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
@@ -25,19 +27,25 @@ use wayland_client::protocol::{
 };
 use wayland_client::{Connection, Proxy, QueueHandle};
 
+use crate::config::Settings;
 use crate::event::{keypress_event, modifiers_event, mouse_event};
-use crate::graphics::{Screenshot, State};
+use crate::graphics::{Background, State};
 
+/// Map of Wayland Surface Ids to Wgpu Renderering Instances
 type RenderersMap = BTreeMap<u32, State<'static>>;
 
+/// Wayland Seat Objects Tracker
 struct SeatObject {
     seat: wl_seat::WlSeat,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     pointer: Option<wl_pointer::WlPointer>,
 }
 
+/// Internal Window Application State
 struct AppData {
     exit: bool,
+    error: Option<String>,
+    settings: Settings,
     // common compositer components
     conn: Connection,
     compositor_state: CompositorState,
@@ -50,7 +58,7 @@ struct AppData {
     lock_surfaces: Vec<SessionLockSurface>,
     // rendering components
     renderers: Arc<RwLock<RenderersMap>>,
-    screenshot: Screenshot,
+    background: Background,
     // input components
     seat_state: SeatState,
     seat_objects: Vec<SeatObject>,
@@ -77,36 +85,42 @@ impl AppData {
     }
 }
 
-pub fn runlock() {
-    env_logger::init();
-
+/// Run LockScren with Configured Settings
+pub fn lock(settings: Settings) -> Result<()> {
     let conn = Connection::connect_to_env().unwrap();
     let (globals, event_queue) = registry_queue_init(&conn).unwrap();
     let qh: QueueHandle<AppData> = event_queue.handle();
 
     // take screenshots of outputs
-    // take screenshot of current output (TODO: multimonitor support)
-    let wayshot = libwayshot::WayshotConnection::from_connection(conn.clone())
-        .expect("screenshot connection failed");
-    let screenshot = wayshot.screenshot_all(false).expect("screenshot failed");
-
-    // weird fix to get the screenshot to render properly
-    // load in and out of image objects
-    let mut b: Vec<u8> = vec![];
-    let mut w = std::io::Cursor::new(&mut b);
-    screenshot
-        .write_to(&mut w, image::ImageFormat::Png)
-        .expect("failed to decode screenshot");
-    let screenshot = image::load_from_memory(&b)
-        .expect("failed to load screenshot")
+    let image = match &settings.background {
+        Some(path) => std::fs::read(path).context("failed to read background image")?,
+        None => {
+            // take screenshot of current output (TODO: multimonitor support)
+            let wayshot = libwayshot::WayshotConnection::from_connection(conn.clone())
+                .context("wayshot - screenshot connection failed")?;
+            let screenshot = wayshot.screenshot_all(false).expect("screenshot failed");
+            // weird fix to get the background to render properly
+            // load in and out of image objects
+            let mut b: Vec<u8> = vec![];
+            let mut w = std::io::Cursor::new(&mut b);
+            screenshot
+                .write_to(&mut w, image::ImageFormat::Png)
+                .context("failed to decode screenshot")?;
+            b
+        }
+    };
+    let background = image::load_from_memory(&image)
+        .context("invalid background image")?
         .to_rgba8();
 
     // prepare event-loop
     let mut event_loop: EventLoop<AppData> =
-        EventLoop::try_new().expect("Failed to initialize the event loop!");
+        EventLoop::try_new().context("wayland - failed to init event-loop")?;
 
     let mut app_data = AppData {
         exit: false,
+        error: None,
+        settings,
         // compositor components
         conn: conn.clone(),
         compositor_state: CompositorState::bind(&globals, &qh).unwrap(),
@@ -119,7 +133,7 @@ pub fn runlock() {
         lock_surfaces: Vec::new(),
         // rendering components
         renderers: Arc::new(RwLock::new(RenderersMap::new())),
-        screenshot,
+        background,
         // input management components
         seat_state: SeatState::new(&globals, &qh),
         seat_objects: vec![],
@@ -132,7 +146,7 @@ pub fn runlock() {
         app_data
             .session_lock_state
             .lock(&qh)
-            .expect("ext-session-lock not supported"),
+            .context("wayland - ext-session-lock not supported")?,
     );
 
     WaylandSource::new(conn.clone(), event_queue)
@@ -173,7 +187,12 @@ pub fn runlock() {
                 }
             },
         )
-        .expect("Error during event loop!");
+        .context("event loop crashed")?;
+
+    match app_data.error {
+        Some(err) => Err(anyhow!(err.to_string())),
+        None => Ok(()),
+    }
 }
 
 impl SessionLockHandler for AppData {
@@ -187,10 +206,20 @@ impl SessionLockHandler for AppData {
             let lock_surface = session_lock.create_lock_surface(surface, &output, qh);
             // generate wgpu renderer for surface
             let key = lock_surface.wl_surface().id().protocol_id();
-            let screenshot = self.screenshot.clone();
-            let renderer = pollster::block_on(State::new(conn, screenshot, &lock_surface));
-            renderers.insert(key, renderer);
-            self.lock_surfaces.push(lock_surface);
+            let rgba = self.background.clone();
+            let renderer =
+                pollster::block_on(State::new(conn, rgba, &self.settings.shader, &lock_surface));
+            match renderer {
+                Ok(renderer) => {
+                    renderers.insert(key, renderer);
+                    self.lock_surfaces.push(lock_surface);
+                }
+                Err(err) => {
+                    self.error = Some(err.to_string());
+                    self.exit = true;
+                    break;
+                }
+            }
         }
     }
 
