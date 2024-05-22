@@ -26,7 +26,7 @@ fn key_convert_key(k: Keysym) -> iced_kb::Key {
         _ => match k.key_char() {
             Some(c) => Key::Character(c.to_smolstr()),
             None => {
-                println!("UNIDENFITIED {k:?}");
+                log::warn!("ignoring unidentified key: {k:?}");
                 iced_kb::Key::Unidentified
             }
         },
@@ -102,7 +102,7 @@ pub fn mouse_event(event: &PointerEvent) -> mouse::Event {
             serial,
         } => mouse::Event::ButtonReleased(mouse_convert_button(button)),
         _ => {
-            println!("OTHER MOUSE EVENT: {event:?}");
+            log::warn!("ignoring unexpected mouse event: {event:?}");
             mouse::Event::ButtonPressed(Button::Left)
         }
     }

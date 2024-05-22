@@ -13,8 +13,6 @@ pub fn screenshot(rgba: Background, device: &wgpu::Device, queue: &wgpu::Queue) 
         height: dimensions.1,
         depth_or_array_layers: 1,
     };
-    println!("dimensions {dimensions:?}");
-
     let texture = device.create_texture_with_data(
         queue,
         &wgpu::TextureDescriptor {
