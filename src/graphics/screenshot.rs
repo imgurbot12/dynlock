@@ -2,10 +2,10 @@
 
 use wgpu::util::DeviceExt;
 
-pub type Screenshot = image::ImageBuffer<image::Rgba<u8>, Vec<u8>>;
+pub type Background = image::ImageBuffer<image::Rgba<u8>, Vec<u8>>;
 
 /// Take Screenshot and make Wgpu Texture
-pub fn screenshot(rgba: Screenshot, device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::Texture {
+pub fn screenshot(rgba: Background, device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::Texture {
     // build wgpu texture from image
     let dimensions = rgba.dimensions();
     let texture_size = wgpu::Extent3d {

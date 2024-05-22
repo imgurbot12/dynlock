@@ -12,10 +12,12 @@ run_sway() {
 
 case "$1" in
   "run")
-    $LOCAL/../target/debug/shaderlock
+    cd $LOCAL/..
+    $LOCAL/../target/debug/shaderlock $FLAGS
     swaymsg exit
     ;;
   *)
+    export FLAGS="$@"
     cargo build
     run_sway
     ;;

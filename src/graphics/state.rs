@@ -2,16 +2,20 @@
 
 use std::{ptr::NonNull, time::SystemTime};
 
+use anyhow::{Context, Result};
 use raw_window_handle::{
     RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle,
 };
 use smithay_client_toolkit::session_lock::SessionLockSurface;
 use wayland_client::{Connection, Proxy};
 
-use super::{screenshot::Screenshot, FRAG_SHADER, VERT_SHADER};
+use super::{screenshot::Background, ui::IcedState};
 
+const FRAG_SHADER: &'static str = include_str!("../shaders/error.glsl");
+const VERT_SHADER: &'static str = include_str!("../shaders/shader.vert");
 pub const PUSH_CONSTANTS_SIZE: u32 = std::mem::size_of::<FrameUniforms>() as u32;
 
+/// Shader Push Constant Frame Uniforms
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct FrameUniforms {
@@ -31,6 +35,7 @@ impl FrameUniforms {
     }
 }
 
+/// Rendering Context used to Generate FrameUniforms
 pub struct RenderContext {
     width: usize,
     height: usize,
@@ -49,7 +54,7 @@ impl RenderContext {
     }
 }
 
-/// Graphics State Tracker
+/// Complete Graphics Rendering State Tracker
 pub struct State<'a> {
     format: wgpu::TextureFormat,
     device: wgpu::Device,
@@ -58,15 +63,17 @@ pub struct State<'a> {
     bind_group: wgpu::BindGroup,
     surface: wgpu::Surface<'a>,
     context: RenderContext,
+    iced: IcedState,
 }
 
 impl<'a> State<'a> {
     /// Build Wgpu State Instance
     pub async fn new(
         conn: &Connection,
-        rgba: Screenshot,
+        rgba: Background,
+        shader: &str,
         lock_surface: &SessionLockSurface,
-    ) -> Self {
+    ) -> Result<Self> {
         // spawn wgpu instance
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
@@ -85,7 +92,7 @@ impl<'a> State<'a> {
                     raw_display_handle,
                     raw_window_handle,
                 })
-                .unwrap()
+                .context("wgpu - failed to adopt surface handle")?
         };
         // build device/queue from adapter
         let adapter = instance
@@ -95,7 +102,7 @@ impl<'a> State<'a> {
                 force_fallback_adapter: false,
             })
             .await
-            .expect("Wgpu Init: Adapter Failed");
+            .context("wgpu - adapter init failed")?;
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
@@ -106,13 +113,13 @@ impl<'a> State<'a> {
                         ..Default::default()
                     },
                 },
-                Some(std::path::PathBuf::from("/home/andrew/Code/rust/dynlock/trace").as_path()),
+                None,
             )
             .await
-            .expect("Wgpu Init: Device/Queue Failed");
-
+            .context("wgpu - failed to create device/queue")?;
         // compile shader components
-        let compiler = shaderc::Compiler::new().expect("Shader Init: Compiler Failed");
+        let compiler = shaderc::Compiler::new().context("shaderc - compiler init failed")?;
+        log::debug!("shaderc - compiling vertex shader");
         let vs_spirv = compiler
             .compile_into_spirv(
                 VERT_SHADER,
@@ -121,16 +128,29 @@ impl<'a> State<'a> {
                 "main",
                 None,
             )
-            .expect("Shader Init: Vertex Shader Failed");
+            .context("shaderc - failed to compile vertex shader")?;
+        // attempt to compile fragment shader
+        log::debug!("shaderc - compiling fragment shader");
         let fs_spirv = compiler
             .compile_into_spirv(
-                FRAG_SHADER,
+                shader,
                 shaderc::ShaderKind::Fragment,
                 "shader.frag",
                 "main",
                 None,
             )
-            .expect("Shader Init: Fragment Shader Failed");
+            .unwrap_or_else(|err| {
+                log::error!("failed to compile fragment shader: {err:?}");
+                compiler
+                    .compile_into_spirv(
+                        FRAG_SHADER,
+                        shaderc::ShaderKind::Fragment,
+                        "shader.frag",
+                        "main",
+                        None,
+                    )
+                    .expect("fallback error shader compilation failed")
+            });
         let vs_data = wgpu::util::make_spirv(vs_spirv.as_binary_u8());
         let fs_data = wgpu::util::make_spirv(fs_spirv.as_binary_u8());
         let vs_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -142,6 +162,7 @@ impl<'a> State<'a> {
             source: fs_data,
         });
         // build bind group
+        log::debug!("wgpu - building bind group");
         let screenshot = super::screenshot::screenshot(rgba, &device, &queue);
         let screenshot_view = screenshot.create_view(&wgpu::TextureViewDescriptor::default());
         let screenshot_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -191,6 +212,7 @@ impl<'a> State<'a> {
             label: Some("diffuse_bind_group"),
         });
         // build rendering pipeline
+        log::debug!("wgpu - building rendering pipeline");
         let capabilities = surface.get_capabilities(&adapter);
         let texture_format = capabilities.formats[0];
         let render_pipeline_layout =
@@ -237,8 +259,10 @@ impl<'a> State<'a> {
                 alpha_to_coverage_enabled: false,
             },
         });
+        // spawn iced components
+        let iced = IcedState::new(&adapter, &device, &queue, texture_format);
         // return compiled state object
-        Self {
+        Ok(Self {
             format: texture_format,
             device,
             queue,
@@ -246,10 +270,13 @@ impl<'a> State<'a> {
             bind_group,
             surface,
             context: RenderContext::new(),
-        }
+            iced,
+        })
     }
 
+    /// Configure Rendering Viewports and Surfaces with Width/Height
     pub fn configure(&mut self, width: u32, height: u32) {
+        log::debug!("wgpu - configuing surface ({width}/{height})");
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: self.format,
@@ -264,9 +291,29 @@ impl<'a> State<'a> {
         self.context.width = width as usize;
         self.context.height = height as usize;
         self.surface.configure(&self.device, &surface_config);
+        self.iced.configure(width, height);
     }
 
-    pub fn render(&self) {
+    /// Pass Keyboard Event to Iced UI Instance
+    #[inline]
+    pub fn key_event(&mut self, event: iced_runtime::core::keyboard::Event) {
+        self.iced.key_event(event);
+    }
+
+    /// Pass Mouse Event to Iced UI Instance
+    #[inline]
+    pub fn mouse_event(&mut self, event: iced_runtime::core::mouse::Event) {
+        self.iced.mouse_event(event);
+    }
+
+    /// Check if UI has Completed Authentication
+    #[inline]
+    pub fn is_authenticated(&self) -> bool {
+        return self.iced.is_authenticated();
+    }
+
+    /// Complete Frame Rendering of Entire Graphics Scene
+    pub fn render(&mut self) {
         // prepare texture from surface
         let surface_texture = self
             .surface
@@ -286,12 +333,7 @@ impl<'a> State<'a> {
                     view: &texture_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.0,
-                            g: 0.0,
-                            b: 0.0,
-                            a: 0.0,
-                        }),
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -301,6 +343,7 @@ impl<'a> State<'a> {
             };
             let mut render_pass = encoder.begin_render_pass(&render_pass_desc);
 
+            // render shaders with uniforms and constants
             let constants = FrameUniforms::new(&self.context);
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.bind_group, &[]);
@@ -309,10 +352,11 @@ impl<'a> State<'a> {
                 0,
                 bytemuck::bytes_of(&constants),
             );
-
             render_pass.draw(0..6, 0..1);
         }
-        // Submit the command in the queue to execute
+        // submit rendering for final generation
+        self.iced
+            .render(&self.device, &self.queue, &mut encoder, &texture_view);
         self.queue.submit(Some(encoder.finish()));
         surface_texture.present();
     }

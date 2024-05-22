@@ -2,9 +2,8 @@
 
 mod screenshot;
 mod state;
+mod style;
+mod ui;
 
-const FRAG_SHADER: &'static str = include_str!("../../shaders/shader.frag");
-const VERT_SHADER: &'static str = include_str!("../../shaders/shader.vert");
-
-pub use screenshot::Screenshot;
+pub use screenshot::Background;
 pub use state::State;
