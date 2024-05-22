@@ -1,5 +1,5 @@
 [package]
-name = "shaderlock"
+name = "dynlock"
 version = "0.1.0"
 edition = "2021"
 
@@ -29,6 +29,7 @@ wayland-backend = { version = "0.3.3", features = ["client_system"] }
 wayland-client = { version = "0.31.2" }
 wgpu = { version = "0.19.3", features = ["spirv"] }
 whoami = "1.5.1"
+xdg = "2.5.2"
 
 [dependencies.smithay-client-toolkit]
 git = "https://github.com/Smithay/client-toolkit"
