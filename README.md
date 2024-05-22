@@ -14,6 +14,14 @@ so credit to him for his original creation.
 
 ### Installation
 
+Install Build Dependencies (Ubuntu)
+
+```bash
+$ sudo apt install build-essential make cmake pkg-config llvm libclang-dev libpam-dev libxkbcommon-dev
+```
+
+Compile and Install Binaries
+
 ```bash
 $ make install
 ```

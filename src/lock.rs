@@ -87,8 +87,10 @@ impl AppData {
 
 /// Run LockScren with Configured Settings
 pub fn lock(settings: Settings) -> Result<()> {
-    let conn = Connection::connect_to_env().unwrap();
-    let (globals, event_queue) = registry_queue_init(&conn).unwrap();
+    let conn =
+        Connection::connect_to_env().context("wayland - failed to open wayland connection")?;
+    let (globals, event_queue) =
+        registry_queue_init(&conn).context("wayland - failed to register event-queue")?;
     let qh: QueueHandle<AppData> = event_queue.handle();
 
     // take screenshots of outputs
@@ -98,7 +100,7 @@ pub fn lock(settings: Settings) -> Result<()> {
             // take screenshot of current output (TODO: multimonitor support)
             let wayshot = libwayshot::WayshotConnection::from_connection(conn.clone())
                 .context("wayshot - screenshot connection failed")?;
-            let screenshot = wayshot.screenshot_all(false).expect("screenshot failed");
+            let screenshot = wayshot.screenshot_all(false).context("screenshot failed")?;
             // weird fix to get the background to render properly
             // load in and out of image objects
             let mut b: Vec<u8> = vec![];
