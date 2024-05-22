@@ -1,5 +1,8 @@
 #version 450
-//NOTE: blatantly stolen from https://www.shadertoy.com/view/4t3BWl
+// LICENSE: CC BY-NC-SA 3.0 DEED (https://www.shadertoy.com/terms)
+// AUTHOR:  And390
+// FOUND:   https://www.shadertoy.com/view/4t3BWl
+// STATUS:  slightly modified to work for dynlock
 
 layout(location=0) out vec4 f_color;
 

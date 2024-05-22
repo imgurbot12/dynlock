@@ -1,4 +1,8 @@
 #version 450
+// LICENSE: WTFPL/CC? (https://creativecommons.org/2015/05/06/medium-embraces-cc-licenses/)
+// AUTHOR:  Jack Chan
+// FOUND:   https://medium.com/nerd-for-tech/logging-in-rust-e529c241f92e
+// STATUS:  slightly modified to work for dynlock
 
 layout(location=0) out vec4 f_color;
 

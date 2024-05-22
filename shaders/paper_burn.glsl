@@ -1,4 +1,8 @@
 #version 450
+// LICENSE: MIT (https://github.com/RobinMcCorkell/shaderlock/blob/master/LICENSE)
+// AUTHOR:  RobinMcCorkell
+// FOUND:   https://github.com/RobinMcCorkell/shaderlock/blob/master/dist/shaders/paper_burn.frag
+// STATUS:  slightly modified to work for dynlock
 
 layout(location=0) out vec4 f_color;
 
