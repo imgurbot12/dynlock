@@ -9,6 +9,7 @@ mod config;
 mod event;
 mod graphics;
 mod lock;
+mod pid;
 
 use crate::config::{Config, Settings};
 
@@ -112,11 +113,11 @@ impl Cli {
 }
 
 fn main() -> Result<()> {
-    // enable log and set default level
-    if std::env::var("RUST_LOG").is_err() {
-        std::env::set_var("RUST_LOG", "info");
-    }
     env_logger::init();
+
+    // ensure only one lock instance runs at a time
+    println!("making lock?");
+    let _lock = pid::PidLock::new()?;
 
     // parse cli and run lockscreen
     let cli = Cli::parse();
