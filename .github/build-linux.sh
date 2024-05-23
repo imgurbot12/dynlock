@@ -5,6 +5,9 @@ PACKAGE="$NAME-${GITHUB_REF_NAME:-latest}"
 
 RELEASE="target/release/$NAME"
 
+# install dependencies
+sudo apt-get install -y build-essential make cmake pkg-config llvm libclang-dev libpam-dev libxkbcommon-dev
+
 # build binaries
 cargo build --all --release
 strip "$RELEASE"
