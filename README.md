@@ -1,6 +1,6 @@
 ## dynlock
 
-Dynamic and Configurable Lockscreen with Customizable UI and Shader Support
+Dynamic and configurable lockscreen with customizable UI and shader support
 
 This tools foundation builds heavily on the concepts and design
 in [RobinMcCorkell's Shaderlock](https://github.com/RobinMcCorkell/shaderlock)
