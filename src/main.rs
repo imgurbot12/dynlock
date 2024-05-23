@@ -116,7 +116,6 @@ fn main() -> Result<()> {
     env_logger::init();
 
     // ensure only one lock instance runs at a time
-    println!("making lock?");
     let _lock = pid::PidLock::new()?;
 
     // parse cli and run lockscreen

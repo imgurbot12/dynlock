@@ -17,7 +17,6 @@ impl PidLock {
             .context("failed to read xdg base-dirs")?
             .get_runtime_file("dynlock.lock")
             .context("failed to locate lockfile")?;
-        println!("path {path:?}");
         let lock = File::create(&path).context("failed to create lockfile")?;
         lock.try_lock_exclusive()
             .context("failed to lock lockfile")?;
