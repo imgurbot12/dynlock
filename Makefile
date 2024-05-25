@@ -4,11 +4,13 @@ CARGO=cargo
 FLAGS=--release
 
 DEST=$(HOME)/.config/dynlock
+PREFIX=/usr
 
 notice:
 	@echo "run 'make install'"
 
 clean:
+	rm dynlock.1
 	${CARGO} clean
 
 build:
@@ -16,10 +18,13 @@ build:
 
 install: build
 	mkdir -p ${DEST}
+	mkdir -p ${PREFIX}/local/share/man/man1/
 	cp -fr shaders ${DEST}/.
 	cp -f default-config.yaml ${DEST}/config.yaml
-	sudo install target/release/dynlock /usr/local/bin/.
+	sudo install target/release/dynlock ${PREFIX}/bin/.
+	sudo cp dynlock.1 ${PREFIX}/local/share/man/man1/
 
 uninstall:
 	rm -rf ${DEST}
-	sudo rm -f /usr/local/bin/dynlock
+	sudo rm -f ${PREFIX}/local/bin/dynlock
+	sudo rm -f ${PREFIX}/local/share/man/man1/dynlock.1

@@ -27,9 +27,9 @@ use wayland_client::protocol::{
 };
 use wayland_client::{Connection, Proxy, QueueHandle};
 
-use crate::config::Settings;
 use crate::event::{keypress_event, modifiers_event, mouse_event};
 use crate::graphics::{Background, State};
+use dynlock_lib::Settings;
 
 /// Map of Wayland Surface Ids to Wgpu Renderering Instances
 type RenderersMap = BTreeMap<u32, State<'static>>;
@@ -411,8 +411,9 @@ impl CompositorHandler for AppData {
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
         _surface: &wl_surface::WlSurface,
-        _new_factor: i32,
+        new_factor: i32,
     ) {
+        log::debug!("wayland - scale factor changed: {new_factor:?}");
     }
 
     fn transform_changed(
@@ -420,8 +421,9 @@ impl CompositorHandler for AppData {
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
         _surface: &wl_surface::WlSurface,
-        _new_transform: wl_output::Transform,
+        new_transform: wl_output::Transform,
     ) {
+        log::debug!("wayland - transform changed: {new_transform:?}");
     }
 
     fn frame(
@@ -431,6 +433,26 @@ impl CompositorHandler for AppData {
         _surface: &wl_surface::WlSurface,
         _time: u32,
     ) {
+    }
+
+    fn surface_enter(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _surface: &wl_surface::WlSurface,
+        _output: &wl_output::WlOutput,
+    ) {
+        log::debug!("wayland - surface enter");
+    }
+
+    fn surface_leave(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _surface: &wl_surface::WlSurface,
+        _output: &wl_output::WlOutput,
+    ) {
+        log::debug!("wayland - surface leave");
     }
 }
 
@@ -445,6 +467,7 @@ impl OutputHandler for AppData {
         _qh: &QueueHandle<Self>,
         _output: wl_output::WlOutput,
     ) {
+        log::debug!("wayland - new output");
     }
 
     fn update_output(
@@ -461,6 +484,7 @@ impl OutputHandler for AppData {
         _qh: &QueueHandle<Self>,
         _output: wl_output::WlOutput,
     ) {
+        log::debug!("wayland - output destroyed");
     }
 }
 
