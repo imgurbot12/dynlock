@@ -1,12 +1,12 @@
 //! Smithay Wayland LockScreen Generation and Runtime
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, Context, Result};
 
-use calloop::EventLoop;
 use smithay_client_toolkit::reexports::calloop::timer::{TimeoutAction, Timer};
+use smithay_client_toolkit::reexports::calloop::EventLoop;
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
 
 use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState};
@@ -155,6 +155,8 @@ pub fn lock(settings: Settings) -> Result<()> {
         .insert(event_loop.handle())
         .unwrap();
 
+    //TODO: need some sort of leaky-bucket model here to track fps and
+    //allow for shorter waits when frames begin to slow
     let fps = 60;
     let dist = 1000 / fps;
     let handle = event_loop.handle();
@@ -170,11 +172,13 @@ pub fn lock(settings: Settings) -> Result<()> {
                         app_data.exit = true
                     }
                 }
+                log::debug!("frame rendered!");
                 TimeoutAction::ToDuration(Duration::from_millis(dist))
             },
         )
         .expect("failed to schedule rendering loop");
 
+    let start = SystemTime::now();
     let signal = event_loop.get_signal();
     event_loop
         .run(
@@ -191,6 +195,11 @@ pub fn lock(settings: Settings) -> Result<()> {
         )
         .context("event loop crashed")?;
 
+    let seconds = SystemTime::now()
+        .duration_since(start)
+        .unwrap_or_default()
+        .as_secs_f64();
+    log::info!("lockscreen ran for {seconds}s");
     match app_data.error {
         Some(err) => Err(anyhow!(err.to_string())),
         None => Ok(()),
@@ -200,6 +209,7 @@ pub fn lock(settings: Settings) -> Result<()> {
 impl SessionLockHandler for AppData {
     fn locked(&mut self, conn: &Connection, qh: &QueueHandle<Self>, session_lock: SessionLock) {
         // prepare sufaces and renderers for lockscreen
+        log::debug!("wayland - locking screen and generating renderers");
         let arc = Arc::clone(&self.renderers);
         let mut renderers = arc.write().expect("renderer write lock failed");
         for output in self.output_state.outputs() {
@@ -217,6 +227,10 @@ impl SessionLockHandler for AppData {
             ));
             match renderer {
                 Ok(renderer) => {
+                    // track outputs to wl-surface
+                    let oid = output.id().protocol_id();
+                    log::debug!("wayland - renderer assigned (output={oid}, surface={key})");
+                    // track wl-surface to rendering pipeline
                     renderers.insert(key, renderer);
                     self.lock_surfaces.push(lock_surface);
                 }
@@ -439,20 +453,24 @@ impl CompositorHandler for AppData {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _surface: &wl_surface::WlSurface,
-        _output: &wl_output::WlOutput,
+        surface: &wl_surface::WlSurface,
+        output: &wl_output::WlOutput,
     ) {
-        log::debug!("wayland - surface enter");
+        let oid = output.id().protocol_id();
+        let sid = surface.id().protocol_id();
+        log::debug!("wayland - surface enter (output={oid} surface={sid})");
     }
 
     fn surface_leave(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _surface: &wl_surface::WlSurface,
-        _output: &wl_output::WlOutput,
+        surface: &wl_surface::WlSurface,
+        output: &wl_output::WlOutput,
     ) {
-        log::debug!("wayland - surface leave");
+        let oid = output.id().protocol_id();
+        let sid = surface.id().protocol_id();
+        log::debug!("wayland - surface leave (output={oid} surface={sid})");
     }
 }
 
@@ -465,26 +483,30 @@ impl OutputHandler for AppData {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _output: wl_output::WlOutput,
+        output: wl_output::WlOutput,
     ) {
-        log::debug!("wayland - new output");
+        let oid = output.id().protocol_id();
+        log::debug!("wayland - new output (output={oid})");
     }
 
     fn update_output(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _output: wl_output::WlOutput,
+        output: wl_output::WlOutput,
     ) {
+        let oid = output.id().protocol_id();
+        log::debug!("wayland - updated output (output={oid})");
     }
 
     fn output_destroyed(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _output: wl_output::WlOutput,
+        output: wl_output::WlOutput,
     ) {
-        log::debug!("wayland - output destroyed");
+        let oid = output.id().protocol_id();
+        log::debug!("wayland - output destroyed (output={oid})");
     }
 }
 

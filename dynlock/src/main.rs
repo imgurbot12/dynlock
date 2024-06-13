@@ -1,15 +1,16 @@
 //! Dynamic ScreenLock CLI
-use rand::seq::IteratorRandom;
+use std::fs::File;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
+use rand::seq::IteratorRandom;
 
 mod event;
 mod graphics;
 mod lock;
 
-use dynlock_lib::{Cli, Config, Settings};
 use clap_builder::Parser;
+use dynlock_lib::{Cli, Config, Settings};
 
 const XDG_PREFIX: &'static str = "dynlock";
 const DEFAULT_CONFIG: &'static str = "config.yaml";
@@ -75,8 +76,8 @@ pub fn settings(cli: Cli) -> Result<Settings> {
     // resolve background image path
     let mut background = cli.background.or(config.background).map(PathBuf::from);
     if let Some(bg) = background {
-        let bpath = find_file(&bg, vec!["png", "jpg", "jpeg"])
-            .context("failed to find background")?;
+        let bpath =
+            find_file(&bg, vec!["png", "jpg", "jpeg"]).context("failed to find background")?;
         log::info!("loading background image: {bpath:?}");
         background = Some(bpath);
     }
@@ -95,10 +96,24 @@ pub fn settings(cli: Cli) -> Result<Settings> {
 }
 
 fn main() -> Result<()> {
-    env_logger::init();
-
-    // parse cli and run lockscreen
+    // parse cli and init logger
     let cli = Cli::parse();
+    match &cli.logfile {
+        None => env_logger::init(),
+        Some(logfile) => {
+            // set default loglevel via env
+            if std::env::var("RUST_LOG").is_err() {
+                std::env::set_var("RUST_LOG", "info");
+            }
+            // generate logging instance
+            let target = Box::new(File::create(logfile).context("failed to create logfile")?);
+            env_logger::Builder::from_env("RUST_LOG")
+                .target(env_logger::Target::Pipe(target))
+                .init();
+        }
+    };
+
+    // convert cli flags into settings object
     let daemonize = cli.daemonize;
     let settings = settings(cli)?;
 

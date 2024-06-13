@@ -8,7 +8,6 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.86"
 bytemuck = "1.15.0"
-calloop = { version = "0.13.0" }
 chrono = "0.4.38"
 clap_builder = "4.5.2"
 daemonize = "0.5.0"
@@ -31,13 +30,17 @@ shellexpand = "3.1.0"
 smol_str = "0.2.1"
 wayland-backend = { version = "0.3.3", features = ["client_system"] }
 wayland-client = { version = "0.31.2" }
-wgpu = { version = "0.19.3", features = ["spirv"] }
 whoami = "1.5.1"
 xdg = "2.5.2"
 
 [dependencies.smithay-client-toolkit]
 git = "https://github.com/Smithay/client-toolkit"
-version = "0.18.0"
+tag = "v0.19.1"
+
+# enable spirv feature on iced-wgpu transitive dependency
+[dependencies.wgpu]
+version = "*"
+features = ["spirv"]
 
 [build-dependencies]
 clap_builder = "4.5.2"

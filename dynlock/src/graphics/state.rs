@@ -328,10 +328,13 @@ impl<'a> State<'a> {
     /// Complete Frame Rendering of Entire Graphics Scene
     pub fn render(&mut self) {
         // prepare texture from surface
-        let surface_texture = self
-            .surface
-            .get_current_texture()
-            .expect("failed to acquire next swapchain texture");
+        let surface_texture = match self.surface.get_current_texture() {
+            Ok(texture) => texture,
+            Err(err) => {
+                log::error!("wgpu - failed to acquire texture: {err:?}");
+                return;
+            }
+        };
         let texture_view = surface_texture
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());

@@ -33,4 +33,7 @@ pub struct Cli {
     /// Useful for preventing more than once instance from running at once
     #[clap(short = 'f', long)]
     pub daemonize: bool,
+    /// Optional Logfile for Logging Output
+    #[clap(short, long)]
+    pub logfile: Option<String>,
 }
