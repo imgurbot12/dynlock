@@ -94,26 +94,20 @@ pub fn lock(settings: Settings) -> Result<()> {
     let qh: QueueHandle<AppData> = event_queue.handle();
 
     // take screenshots of outputs
-    let image = match &settings.background {
-        Some(path) => std::fs::read(path).context("failed to read background image")?,
+    let background = match &settings.background {
+        Some(path) => {
+            let img = std::fs::read(path).context("failed to read background image")?;
+            image::load_from_memory(&img)
+                .context("invalid background image")?
+                .to_rgba8()
+        }
         None => {
             // take screenshot of current output (TODO: multimonitor support)
             let wayshot = libwayshot::WayshotConnection::from_connection(conn.clone())
                 .context("wayshot - screenshot connection failed")?;
-            let screenshot = wayshot.screenshot_all(false).context("screenshot failed")?;
-            // weird fix to get the background to render properly
-            // load in and out of image objects
-            let mut b: Vec<u8> = vec![];
-            let mut w = std::io::Cursor::new(&mut b);
-            screenshot
-                .write_to(&mut w, image::ImageFormat::Png)
-                .context("failed to decode screenshot")?;
-            b
+            wayshot.screenshot_all(false).context("screenshot failed")?
         }
     };
-    let background = image::load_from_memory(&image)
-        .context("invalid background image")?
-        .to_rgba8();
 
     // prepare event-loop
     let mut event_loop: EventLoop<AppData> =
