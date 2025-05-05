@@ -23,6 +23,8 @@ fn key_convert_key(k: Keysym) -> iced_kb::Key {
         Keysym::Down => Key::Named(Named::ArrowDown),
         Keysym::Left => Key::Named(Named::ArrowLeft),
         Keysym::Right => Key::Named(Named::ArrowRight),
+        Keysym::Control_L => Key::Named(Named::Control),
+        Keysym::Control_R => Key::Named(Named::Control),
         Keysym::Caps_Lock => Key::Named(Named::CapsLock),
         _ => match k.key_char() {
             Some(c) => Key::Character(c.to_smolstr()),

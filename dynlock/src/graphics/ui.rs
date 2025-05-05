@@ -23,6 +23,7 @@ const SHOW_ICON: &'static [u8] = include_bytes!("../../icons/show.png");
 
 // keyboard handling utilities
 const TAB: keyboard::Key = keyboard::Key::Named(keyboard::key::Named::Tab);
+const CTRL: keyboard::Key = keyboard::Key::Named(keyboard::key::Named::Control);
 const ESCAPE: keyboard::Key = keyboard::Key::Named(keyboard::key::Named::Escape);
 const CAPS_LOCK: keyboard::Key = keyboard::Key::Named(keyboard::key::Named::CapsLock);
 const HOLD_KEY_TIMEOUT: Duration = Duration::from_millis(200);
@@ -47,7 +48,7 @@ pub enum Message {
     Submit,
     Focus,
     Reset,
-    ToggleShow,
+    ToggleHide(Option<bool>),
     CapsLock(bool),
 }
 
@@ -141,7 +142,7 @@ impl iced_runtime::Program for UI {
                 .width(Length::Fixed(size))
                 .height(Length::Fixed(size)),
         )
-        .on_press(Message::ToggleShow)
+        .on_press(Message::ToggleHide(None))
         .style(style::show());
 
         let mut controls = Row::new().push(password);
@@ -180,7 +181,7 @@ impl iced_runtime::Program for UI {
             Message::Focus => return iced_widget::text_input::focus(self.input_id.clone()),
             Message::Reset => self.password.clear(),
             Message::CapsLock(caps) => self.caps_lock = caps,
-            Message::ToggleShow => self.hide_input = !self.hide_input,
+            Message::ToggleHide(status) => self.hide_input = status.unwrap_or(!self.hide_input),
         }
         iced_runtime::Command::none()
     }
@@ -268,12 +269,15 @@ impl IcedState {
             keyboard::Event::KeyPressed { key, .. } => match key.clone() {
                 TAB => state.queue_message(Message::Focus),
                 ESCAPE => state.queue_message(Message::Reset),
+                CTRL => state.queue_message(Message::ToggleHide(Some(false))),
                 CAPS_LOCK => state.queue_message(Message::CapsLock(true)),
                 _ => self.last_key = Some(LastKeyTracker::new(event.to_owned())),
             },
             keyboard::Event::KeyReleased { key, .. } => {
-                if key == &CAPS_LOCK {
-                    state.queue_message(Message::CapsLock(false));
+                match key.clone() {
+                    CTRL => state.queue_message(Message::ToggleHide(Some(true))),
+                    CAPS_LOCK => state.queue_message(Message::CapsLock(false)),
+                    _ => (),
                 }
                 self.last_key = None;
             }
