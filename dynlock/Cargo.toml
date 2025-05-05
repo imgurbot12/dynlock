@@ -27,16 +27,13 @@ raw-window-handle = "0.6.2"
 serde_yaml = "0.9.34"
 shaderc = "0.8.3"
 shellexpand = "3.1.1"
+smithay-client-toolkit = "0.19.2"
 smol_str = "0.2.2"
 wayland-backend = { version = "0.3.10", features = ["client_system"] }
 wayland-client = { version = "0.31.10" }
 wgpu = { version = "0.19", features = ["spirv"] }
 whoami = "1.6.0"
 xdg = "2.5.2"
-
-[dependencies.smithay-client-toolkit]
-git = "https://github.com/Smithay/client-toolkit"
-tag = "v0.19.1"
 
 [build-dependencies]
 clap_builder = "4.5.37"
