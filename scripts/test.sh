@@ -10,15 +10,32 @@ run_sway() {
   sway -c "$LOCAL/sway.config"
 }
 
-case "$1" in
+run_hyprland() {
+  export SHADERLOCK=$(pwd)
+  Hyprland -c "$LOCAL/hyprland.config"
+}
+
+command="$1"
+shift
+
+case "$command" in
   "run")
     cd $LOCAL/..
-    $LOCAL/../target/debug/dynlock $FLAGS
-    swaymsg exit
+    RUST_BACKTRACE=1 $LOCAL/../target/debug/dynlock $FLAGS
+    swaymsg exit || hyprctl dispatch exit
     ;;
-  *)
+  "sway")
     export FLAGS="$@"
     cargo build
     run_sway
+    ;;
+  "hyprland")
+    export FLAGS="$@"
+    cargo build
+    run_hyprland
+    ;;
+  *)
+    echo "usage: $(dirname $0) <sway/hyprland>"
+    exit 1
     ;;
 esac

@@ -40,7 +40,6 @@ pub struct RenderContext {
     width: usize,
     height: usize,
     start: SystemTime,
-    fade_amount: f32,
 }
 
 impl RenderContext {
@@ -49,7 +48,6 @@ impl RenderContext {
             width: 256,
             height: 256,
             start: SystemTime::now(),
-            fade_amount: 0.0,
         }
     }
 }

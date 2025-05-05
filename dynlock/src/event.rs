@@ -23,6 +23,7 @@ fn key_convert_key(k: Keysym) -> iced_kb::Key {
         Keysym::Down => Key::Named(Named::ArrowDown),
         Keysym::Left => Key::Named(Named::ArrowLeft),
         Keysym::Right => Key::Named(Named::ArrowRight),
+        Keysym::Caps_Lock => Key::Named(Named::CapsLock),
         _ => match k.key_char() {
             Some(c) => Key::Character(c.to_smolstr()),
             None => {
@@ -79,7 +80,16 @@ pub fn keypress_event(
 
 /// Convert Wayland Modifiers-Event to Iced Modifiers-Event
 pub fn modifiers_event(modifiers: stk_kb::Modifiers) -> core_kb::Event {
-    core_kb::Event::ModifiersChanged(key_convert_modifiers(Some(modifiers)))
+    let mods = key_convert_modifiers(Some(modifiers));
+    if mods.is_empty() && modifiers.caps_lock {
+        return core_kb::Event::KeyPressed {
+            key: Key::Named(Named::CapsLock),
+            location: core_kb::Location::Standard,
+            modifiers: iced_kb::Modifiers::default(),
+            text: None,
+        };
+    }
+    core_kb::Event::ModifiersChanged(mods)
 }
 
 /// Convert Wayland Mouse-Event into Iced Mouse-Event

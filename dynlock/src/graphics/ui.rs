@@ -13,19 +13,29 @@ use iced_wgpu::graphics::Viewport;
 use iced_wgpu::Settings;
 use iced_wgpu::{wgpu, Backend, Renderer};
 
-use iced_widget::{container, Column, Theme};
+use iced_widget::{container, Column, Row, Theme};
 
 use super::style;
 
+const CAPS_LOCK_ICON: &'static [u8] = include_bytes!("../../icons/caps-lock.png");
+const HIDE_ICON: &'static [u8] = include_bytes!("../../icons/hide.png");
+const SHOW_ICON: &'static [u8] = include_bytes!("../../icons/show.png");
+
 // keyboard handling utilities
 const TAB: keyboard::Key = keyboard::Key::Named(keyboard::key::Named::Tab);
+const ESCAPE: keyboard::Key = keyboard::Key::Named(keyboard::key::Named::Escape);
+const CAPS_LOCK: keyboard::Key = keyboard::Key::Named(keyboard::key::Named::CapsLock);
 const HOLD_KEY_TIMEOUT: Duration = Duration::from_millis(200);
 
 /// Lockscreen UI Implementation
 pub struct UI {
     input_id: iced_widget::text_input::Id,
+    caps_img: iced_widget::image::Handle,
+    show_img: iced_widget::image::Handle,
+    hide_img: iced_widget::image::Handle,
     username: String,
     password: String,
+    caps_lock: bool,
     hide_input: bool,
     auth_thread: Option<std::thread::JoinHandle<()>>,
     authenticated: Arc<Mutex<bool>>,
@@ -36,16 +46,26 @@ pub enum Message {
     Typing(String),
     Submit,
     Focus,
+    Reset,
+    ToggleShow,
+    CapsLock(bool),
 }
 
 impl UI {
     pub fn new() -> Self {
         let input_id = iced_widget::text_input::Id::unique();
+        let caps_img = iced_widget::image::Handle::from_memory(CAPS_LOCK_ICON);
+        let hide_img = iced_widget::image::Handle::from_memory(HIDE_ICON);
+        let show_img = iced_widget::image::Handle::from_memory(SHOW_ICON);
         Self {
             input_id,
+            caps_img,
+            show_img,
+            hide_img,
             username: whoami::username(),
             password: "".to_owned(),
             hide_input: true,
+            caps_lock: false,
             auth_thread: None,
             authenticated: Arc::new(Mutex::new(false)),
         }
@@ -109,12 +129,41 @@ impl iced_runtime::Program for UI {
                 .on_input(Message::Typing)
                 .on_submit(Message::Submit);
         }
+        // build input controls
+        let size = 15.0;
+        let img = if self.hide_input {
+            self.hide_img.clone()
+        } else {
+            self.show_img.clone()
+        };
+        let show = iced_widget::Button::new(
+            iced_widget::Image::new(img)
+                .width(Length::Fixed(size))
+                .height(Length::Fixed(size)),
+        )
+        .on_press(Message::ToggleShow)
+        .style(style::show());
+
+        let mut controls = Row::new().push(password);
+        let caps = if self.caps_lock {
+            let caps = iced_widget::Image::new(self.caps_img.clone())
+                .width(Length::Fixed(size))
+                .height(Length::Fixed(size));
+            iced_widget::Button::new(caps).style(style::show())
+        } else {
+            let empty = iced_widget::text("")
+                .width(Length::Fixed(size))
+                .height(Length::Fixed(size));
+            iced_widget::Button::new(empty).style(style::show())
+        };
+        controls = controls.push(caps).push(show);
+
         // construct menu
         let now = chrono::Local::now();
         let message = iced_widget::text(now.format("%H:%M:%S")).size(32.0);
         let menu = Column::new()
             .push(message)
-            .push(password)
+            .push(controls)
             .align_items(iced_wgpu::core::Alignment::Start);
         let menu_box = container(menu).padding(10).style(style::menubox());
         container(menu_box)
@@ -126,19 +175,14 @@ impl iced_runtime::Program for UI {
     }
     fn update(&mut self, message: Self::Message) -> iced_runtime::Command<Self::Message> {
         match message {
-            Message::Typing(e) => {
-                self.password = e;
-                iced_runtime::Command::none()
-            }
-            Message::Submit => {
-                self.start_authenticate();
-                iced_runtime::Command::none()
-            }
-            Message::Focus => {
-                iced_widget::text_input::focus(self.input_id.clone())
-                // iced_widget::text_input::move_cursor_to_end(self.input_id.clone())
-            }
+            Message::Typing(e) => self.password = e,
+            Message::Submit => self.start_authenticate(),
+            Message::Focus => return iced_widget::text_input::focus(self.input_id.clone()),
+            Message::Reset => self.password.clear(),
+            Message::CapsLock(caps) => self.caps_lock = caps,
+            Message::ToggleShow => self.hide_input = !self.hide_input,
         }
+        iced_runtime::Command::none()
     }
 }
 
@@ -221,13 +265,16 @@ impl IcedState {
     pub fn key_event(&mut self, event: keyboard::Event) {
         let state = self.state.as_mut().expect("ui state not configured yet");
         match &event {
-            keyboard::Event::KeyPressed { key, .. } if key == &TAB => {
-                state.queue_message(Message::Focus);
-            }
-            keyboard::Event::KeyPressed { .. } => {
-                self.last_key = Some(LastKeyTracker::new(event.to_owned()));
-            }
-            keyboard::Event::KeyReleased { .. } => {
+            keyboard::Event::KeyPressed { key, .. } => match key.clone() {
+                TAB => state.queue_message(Message::Focus),
+                ESCAPE => state.queue_message(Message::Reset),
+                CAPS_LOCK => state.queue_message(Message::CapsLock(true)),
+                _ => self.last_key = Some(LastKeyTracker::new(event.to_owned())),
+            },
+            keyboard::Event::KeyReleased { key, .. } => {
+                if key == &CAPS_LOCK {
+                    state.queue_message(Message::CapsLock(false));
+                }
                 self.last_key = None;
             }
             _ => {}

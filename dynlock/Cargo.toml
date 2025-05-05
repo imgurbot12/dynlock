@@ -6,43 +6,39 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.86"
-bytemuck = "1.15.0"
-chrono = "0.4.38"
-clap_builder = "4.5.2"
+anyhow = "1.0.98"
+bytemuck = "1.23.0"
+chrono = "0.4.41"
+clap_builder = "4.5.37"
 daemonize = "0.5.0"
 dynlock_lib = { version = "0.1.0", path = "../dynlock_lib" }
-env_logger = "0.11.2"
+env_logger = "0.11.8"
 futures-intrusive = "0.5.0"
 iced_runtime = "0.12.1"
 iced_wgpu = { version = "0.12.1", features = ["image"] }
 iced_widget = { version = "0.12.3", features = ["image"] }
 image = { version = "0.24.9", features = ["png", "jpeg"], default-features = false }
 libwayshot = "0.3.0"
-log = "0.4.21"
+log = "0.4.27"
 pam = "0.8.0"
 pollster = "0.3.0"
 rand = "0.8.5"
-raw-window-handle = "0.6.1"
+raw-window-handle = "0.6.2"
 serde_yaml = "0.9.34"
 shaderc = "0.8.3"
-shellexpand = "3.1.0"
-smol_str = "0.2.1"
-wayland-backend = { version = "0.3.3", features = ["client_system"] }
-wayland-client = { version = "0.31.2" }
-whoami = "1.5.1"
+shellexpand = "3.1.1"
+smol_str = "0.2.2"
+wayland-backend = { version = "0.3.10", features = ["client_system"] }
+wayland-client = { version = "0.31.10" }
+wgpu = { version = "0.19", features = ["spirv"] }
+whoami = "1.6.0"
 xdg = "2.5.2"
 
 [dependencies.smithay-client-toolkit]
 git = "https://github.com/Smithay/client-toolkit"
 tag = "v0.19.1"
 
-# enable spirv feature on iced-wgpu transitive dependency
-[dependencies.wgpu]
-version = "*"
-features = ["spirv"]
-
 [build-dependencies]
-clap_builder = "4.5.2"
-clap_mangen = "0.2.20"
+clap_builder = "4.5.37"
+clap_mangen = "0.2.26"
 dynlock_lib = { version = "0.1.0", path = "../dynlock_lib" }
